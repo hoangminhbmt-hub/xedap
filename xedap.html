@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f172a">
 <title>XeDap Guard</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
   :root {
     --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --muted: #94a3b8;
@@ -31,6 +34,8 @@
   .switch input { width: 26px; height: 26px; }
   #guardState { text-align: center; font-size: 15px; color: var(--muted); margin-top: 8px; }
   #guardState.on { color: var(--ok); }
+  #guardState.warn { color: var(--warn); }
+  #support.warn { color: var(--warn); font-size: 14px; }
   details summary { cursor: pointer; font-weight: 600; }
   #log { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); max-height: 180px; overflow: auto; white-space: pre-wrap; }
   .bar { height: 8px; border-radius: 4px; background: #0b1222; overflow: hidden; margin-top: 6px; }
@@ -104,7 +109,11 @@ const EARLY_COUNT = 3;      // tín hiệu yếu liên tục 3 giây mới cản
 
 const $ = id => document.getElementById(id);
 let device = null, chCmd = null;
-let manualDisconnect = false, lastRx = 0, lostAlarmed = false;
+let manualDisconnect = false, lastRx = 0, rxCount = 0, lostAlarmed = false;
+const SUPPORT_OK = 'Giữ trang này mở và màn hình sáng khi đang canh xe.';
+const PAIR_HINT = '⚠ Chưa ghép đôi với xe nên chưa nhận được dữ liệu. ' +
+  'Điện thoại: nhập mã PIN khi được hỏi. ' +
+  'Máy tính Windows: vào Cài đặt → Bluetooth → Thêm thiết bị → chọn XeDap → nhập PIN, rồi bấm Kết nối lại.';
 let weakCount = 0, earlyWarned = false, lowBattWarned = false;
 let audioCtx = null, siren = null, wakeLock = null;
 
@@ -128,13 +137,29 @@ function setConnected(on) {
   $('connText').textContent = on ? 'Đã kết nối' : (device ? 'Đang tìm lại xe…' : 'Chưa kết nối');
   $('btnConnect').textContent = on ? 'Ngắt kết nối' : 'Kết nối với xe';
   ['btnFind', 'btnPin', 'btnUnpair'].forEach(id => $(id).disabled = !on);
+  updateGuardText();
+}
+
+// Chỉ coi là "đang canh" khi đã kết nối VÀ đã nhận được dữ liệu từ xe
+function updateGuardText() {
+  const on = $('guard').checked;
+  const live = !!(device && device.gatt.connected && rxCount > 0);
+  const el = $('guardState');
+  el.classList.toggle('on', on && live);
+  el.classList.toggle('warn', on && !live);
+  if (!on) el.textContent = 'Đang tắt – không báo động khi mất kết nối';
+  else if (live) el.textContent = 'Đang canh – sẽ báo động khi xe ra xa / mất kết nối';
+  else el.textContent = '⚠ Đã bật canh nhưng chưa nhận dữ liệu từ xe';
+}
+
+function setSupport(text, warn) {
+  $('support').textContent = text;
+  $('support').classList.toggle('warn', !!warn);
 }
 
 $('guard').onchange = () => {
   const on = $('guard').checked;
-  $('guardState').classList.toggle('on', on);
-  $('guardState').textContent = on ? 'Đang canh – sẽ báo động khi xe ra xa / mất kết nối'
-                                   : 'Đang tắt – không báo động khi mất kết nối';
+  updateGuardText();
   weakCount = 0; earlyWarned = false; lostAlarmed = false;
   log(on ? 'Bật canh xe' : 'Tắt canh xe');
   if (on && !(device && device.gatt.connected)) raiseAlarm('📡 CHƯA KẾT NỐI', 'Bạn đang bật canh xe nhưng chưa kết nối với xe.');
@@ -193,6 +218,11 @@ document.addEventListener('visibilitychange', () => {
 function onStatus(text) {
   lastRx = Date.now();
   lostAlarmed = false;
+  if (++rxCount === 1) {
+    setSupport(SUPPORT_OK, false);
+    updateGuardText();
+    log('Đã ghép đôi, đang nhận dữ liệu từ xe');
+  }
   const [pct, mv, rssi, flag] = text.split(',');
   const p = Number(pct), r = Number(rssi);
 
@@ -248,11 +278,27 @@ async function openGatt() {
   const svc = await server.getPrimaryService(SVC);
   const chSt = await svc.getCharacteristic(ST);
   chCmd = await svc.getCharacteristic(CMD);
+  rxCount = 0;
   chSt.addEventListener('characteristicvaluechanged', e => onStatus(new TextDecoder().decode(e.target.value)));
-  await chSt.startNotifications();  // lần đầu: điện thoại hỏi mã PIN ghép đôi
+  // Đọc đặc tính đã mã hoá để buộc điện thoại/máy tính hiện ô nhập mã PIN
+  try {
+    const t = new TextDecoder().decode(await chSt.readValue());
+    if (t.includes(',')) onStatus(t);
+  } catch (e) {
+    log('Chưa ghép đôi: ' + e.message);
+  }
+  await chSt.startNotifications();
   lastRx = Date.now();
   setConnected(true);
   log('Đã kết nối ' + device.name);
+  setTimeout(checkPaired, 5000);
+}
+
+function checkPaired() {
+  if (device && device.gatt.connected && rxCount === 0) {
+    log('⚠ Kết nối 5 giây nhưng chưa có dữ liệu – chưa ghép đôi');
+    setSupport(PAIR_HINT, true);
+  }
 }
 
 async function reconnectLoop() {
@@ -274,8 +320,9 @@ function onDisconnected() {
 }
 
 // Phát hiện mất tín hiệu sớm hơn sự kiện ngắt kết nối của trình duyệt
+// (chỉ khi trước đó đã nhận được dữ liệu; chưa ghép đôi thì đã có checkPaired báo)
 setInterval(() => {
-  if (device && device.gatt.connected && lastRx && Date.now() - lastRx > STALE_MS) {
+  if (device && device.gatt.connected && rxCount > 0 && Date.now() - lastRx > STALE_MS) {
     lostAlarm('Không nhận được tín hiệu từ xe.');
   }
 }, 1000);
@@ -314,9 +361,8 @@ $('btnUnpair').onclick = () => {
   send('UNPAIR').catch(() => {});
 };
 
-$('support').textContent = navigator.bluetooth
-  ? 'Giữ trang này mở và màn hình sáng khi đang canh xe.'
-  : '⚠️ Trình duyệt không hỗ trợ Web Bluetooth. Dùng Chrome trên Android/PC, hoặc ứng dụng Bluefy trên iPhone.';
+if (navigator.bluetooth) setSupport(SUPPORT_OK, false);
+else setSupport('⚠️ Trình duyệt không hỗ trợ Web Bluetooth. Dùng Chrome trên Android/PC, hoặc ứng dụng Bluefy trên iPhone.', true);
 </script>
 </body>
 </html>
