@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f172a">
+<title>XeDap Guard</title>
+<style>
+  :root {
+    --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --muted: #94a3b8;
+    --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444; --accent: #38bdf8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  main { max-width: 480px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 22px; margin: 4px 0 16px; display: flex; justify-content: space-between; align-items: center; }
+  .card { background: var(--card); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .metric { background: #0b1222; border-radius: 10px; padding: 10px; }
+  .metric b { display: block; font-size: 22px; }
+  .metric span { color: var(--muted); font-size: 13px; }
+  button { font: inherit; border: 0; border-radius: 10px; padding: 14px; color: #fff; background: #334155; cursor: pointer; width: 100%; }
+  button:disabled { opacity: .4; }
+  .primary { background: var(--accent); color: #002; font-weight: 600; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bad); display: inline-block; }
+  .dot.on { background: var(--ok); }
+  label { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 12px 0; font-size: 15px; }
+  input[type=number] { width: 110px; padding: 8px; border-radius: 8px; border: 1px solid #475569; background: #0b1222; color: var(--text); }
+  input[type=range] { flex: 1; }
+  .switch { display: flex; align-items: center; justify-content: space-between; font-size: 18px; font-weight: 600; }
+  .switch input { width: 26px; height: 26px; }
+  #guardState { text-align: center; font-size: 15px; color: var(--muted); margin-top: 8px; }
+  #guardState.on { color: var(--ok); }
+  details summary { cursor: pointer; font-weight: 600; }
+  #log { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); max-height: 180px; overflow: auto; white-space: pre-wrap; }
+  .bar { height: 8px; border-radius: 4px; background: #0b1222; overflow: hidden; margin-top: 6px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+  .hint { color: var(--muted); font-size: 13px; }
+  #alarm { position: fixed; inset: 0; background: rgba(185, 28, 28, .96); display: none; flex-direction: column;
+           align-items: center; justify-content: center; gap: 20px; padding: 24px; text-align: center; z-index: 10; }
+  #alarm.show { display: flex; animation: pulse 1s infinite; }
+  #alarm h2 { font-size: 30px; margin: 0; }
+  #alarm button { max-width: 320px; }
+  @keyframes pulse { 50% { background: rgba(127, 29, 29, .96); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>🚲 XeDap Guard <span><span id="dot" class="dot"></span> <small id="connText" class="hint">Chưa kết nối</small></span></h1>
+
+  <div class="card">
+    <button id="btnConnect" class="primary">Kết nối với xe</button>
+    <p class="hint" id="support"></p>
+  </div>
+
+  <div class="card">
+    <div class="switch"><span>🔒 Canh xe</span><input id="guard" type="checkbox"></div>
+    <div id="guardState">Đang tắt – không báo động khi mất kết nối</div>
+  </div>
+
+  <div class="card grid">
+    <div class="metric"><span>Pin trên xe</span><b id="mBatt">–</b><div class="bar"><i id="battBar"></i></div></div>
+    <div class="metric"><span>Khoảng cách</span><b id="mDist">–</b><div class="bar"><i id="rssiBar"></i></div><span id="mRssi"></span></div>
+  </div>
+
+  <div class="card">
+    <button id="btnFind" disabled>💡 Tìm xe (đèn trên mạch nháy 10 giây)</button>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>⚙️ Cài đặt</summary>
+      <label><span>Cảnh báo sớm khi tín hiệu yếu hơn</span><b id="earlyVal"></b></label>
+      <input id="early" type="range" min="-100" max="-60" step="1" style="width:100%">
+      <p class="hint">Kéo sang trái: báo muộn hơn (xe phải xa hơn). Kéo sang phải: báo sớm hơn, dễ báo nhầm hơn.</p>
+      <hr style="border-color:#334155">
+      <label><span>Đổi mã PIN ghép đôi (6 số)</span><input id="newPin" type="number" min="100000" max="999999"></label>
+      <button id="btnPin" disabled>Đổi PIN</button>
+      <p></p>
+      <button id="btnUnpair" disabled>Xoá mọi thiết bị đã ghép</button>
+    </details>
+  </div>
+
+  <div class="card">
+    <details open>
+      <summary>📜 Nhật ký</summary>
+      <div id="log"></div>
+    </details>
+  </div>
+</main>
+
+<div id="alarm">
+  <h2 id="alarmTitle">⚠️ CẢNH BÁO</h2>
+  <p id="alarmMsg"></p>
+  <button class="primary" id="btnAck">Tôi đã biết</button>
+</div>
+
+<script>
+const SVC = '6e7a1001-3c2b-4b8e-9a1f-58c5e1a0b001';
+const ST  = '6e7a1002-3c2b-4b8e-9a1f-58c5e1a0b001';
+const CMD = '6e7a1003-3c2b-4b8e-9a1f-58c5e1a0b001';
+const STALE_MS = 6000;      // không nhận dữ liệu quá 6 giây = mất tín hiệu
+const EARLY_COUNT = 3;      // tín hiệu yếu liên tục 3 giây mới cảnh báo sớm
+
+const $ = id => document.getElementById(id);
+let device = null, chCmd = null;
+let manualDisconnect = false, lastRx = 0, lostAlarmed = false;
+let weakCount = 0, earlyWarned = false, lowBattWarned = false;
+let audioCtx = null, siren = null, wakeLock = null;
+
+// ---------- Lưu cài đặt trên máy (không bắt buộc) ----------
+function loadSetting(key, def) {
+  try { const v = localStorage.getItem(key); return v === null ? def : v; } catch (e) { return def; }
+}
+function saveSetting(key, v) { try { localStorage.setItem(key, v); } catch (e) {} }
+
+$('early').value = loadSetting('early', '-85');
+$('earlyVal').textContent = $('early').value + ' dBm';
+$('early').oninput = () => { $('earlyVal').textContent = $('early').value + ' dBm'; saveSetting('early', $('early').value); };
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString('vi-VN');
+  $('log').textContent = `${t}  ${msg}\n` + $('log').textContent;
+}
+
+function setConnected(on) {
+  $('dot').classList.toggle('on', on);
+  $('connText').textContent = on ? 'Đã kết nối' : (device ? 'Đang tìm lại xe…' : 'Chưa kết nối');
+  $('btnConnect').textContent = on ? 'Ngắt kết nối' : 'Kết nối với xe';
+  ['btnFind', 'btnPin', 'btnUnpair'].forEach(id => $(id).disabled = !on);
+}
+
+$('guard').onchange = () => {
+  const on = $('guard').checked;
+  $('guardState').classList.toggle('on', on);
+  $('guardState').textContent = on ? 'Đang canh – sẽ báo động khi xe ra xa / mất kết nối'
+                                   : 'Đang tắt – không báo động khi mất kết nối';
+  weakCount = 0; earlyWarned = false; lostAlarmed = false;
+  log(on ? 'Bật canh xe' : 'Tắt canh xe');
+  if (on && !(device && device.gatt.connected)) raiseAlarm('📡 CHƯA KẾT NỐI', 'Bạn đang bật canh xe nhưng chưa kết nối với xe.');
+};
+
+// ---------- Âm thanh / rung / thông báo ----------
+function startSiren() {
+  if (!audioCtx || siren) return;
+  const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+  osc.type = 'square'; gain.gain.value = 0.3;
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start();
+  let up = true;
+  const timer = setInterval(() => {
+    osc.frequency.linearRampToValueAtTime(up ? 1400 : 700, audioCtx.currentTime + 0.45);
+    up = !up;
+  }, 450);
+  siren = { osc, timer };
+}
+function stopSiren() {
+  if (!siren) return;
+  clearInterval(siren.timer); siren.osc.stop(); siren = null;
+  if (navigator.vibrate) navigator.vibrate(0);
+}
+function notify(text) {
+  try { if (Notification.permission === 'granted') new Notification('XeDap Guard', { body: text }); } catch (e) {}
+}
+function raiseAlarm(title, msg) {
+  $('alarmTitle').textContent = title;
+  $('alarmMsg').textContent = msg;
+  $('alarm').classList.add('show');
+  startSiren();
+  if (navigator.vibrate) navigator.vibrate([800, 300, 800, 300, 800, 300, 800]);
+  notify(msg);
+  log('⚠️ ' + msg);
+}
+function softWarn(msg) {
+  log('🔔 ' + msg);
+  notify(msg);
+  if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator(); o.frequency.value = 1000;
+  o.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.2);
+}
+$('btnAck').onclick = () => { $('alarm').classList.remove('show'); stopSiren(); };
+
+// ---------- Giữ màn hình sáng ----------
+async function keepAwake() {
+  try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && device) keepAwake();
+});
+
+// ---------- Xử lý trạng thái từ xe: "pin%,mV,rssi,cờ" ----------
+function onStatus(text) {
+  lastRx = Date.now();
+  lostAlarmed = false;
+  const [pct, mv, rssi, flag] = text.split(',');
+  const p = Number(pct), r = Number(rssi);
+
+  if (p >= 0) {
+    $('mBatt').textContent = `${p}% · ${(Number(mv) / 1000).toFixed(2)}V`;
+    $('battBar').style.width = p + '%';
+    $('battBar').style.background = p <= 20 ? 'var(--bad)' : 'var(--ok)';
+  } else {
+    $('mBatt').textContent = 'Không đo';
+  }
+
+  if (r) {
+    $('mRssi').textContent = r + ' dBm';
+    $('mDist').textContent = r > -60 ? 'Rất gần' : r > -75 ? 'Gần' : r > -88 ? 'Xa' : 'Rất xa';
+    $('rssiBar').style.width = Math.max(0, Math.min(100, (r + 100) * 2)) + '%';
+    $('rssiBar').style.background = r <= Number($('early').value) ? 'var(--warn)' : 'var(--accent)';
+  }
+
+  // Cảnh báo sớm: tín hiệu yếu liên tục vài giây khi đang canh
+  if ($('guard').checked && r && r <= Number($('early').value)) {
+    if (++weakCount >= EARLY_COUNT && !earlyWarned) {
+      earlyWarned = true;
+      softWarn(`Xe đang ra xa (tín hiệu ${r} dBm)`);
+    }
+  } else {
+    weakCount = 0;
+    if (r > Number($('early').value) + 5) earlyWarned = false;
+  }
+
+  if (flag === 'L' && !lowBattWarned) { lowBattWarned = true; softWarn('Pin trên xe yếu, hãy sạc pin sớm'); }
+  if (flag === '-' && p > 30) lowBattWarned = false;
+  if (flag === 'S') {
+    $('guard').checked = false; $('guard').onchange();
+    raiseAlarm('🔋 PIN CẠN', 'Pin trên xe đã cạn, thiết bị tắt để bảo vệ pin. Đã tự tắt canh xe để không báo nhầm.');
+  }
+}
+
+function lostAlarm(reason) {
+  if (lostAlarmed || manualDisconnect || !$('guard').checked) return;
+  lostAlarmed = true;
+  raiseAlarm('🚨 MẤT KẾT NỐI', reason + ' Xe có thể đã bị dắt đi!');
+}
+
+// ---------- BLE ----------
+async function send(cmd) {
+  if (!chCmd) return;
+  await chCmd.writeValueWithResponse(new TextEncoder().encode(cmd));
+  log('→ ' + cmd);
+}
+
+async function openGatt() {
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(SVC);
+  const chSt = await svc.getCharacteristic(ST);
+  chCmd = await svc.getCharacteristic(CMD);
+  chSt.addEventListener('characteristicvaluechanged', e => onStatus(new TextDecoder().decode(e.target.value)));
+  await chSt.startNotifications();  // lần đầu: điện thoại hỏi mã PIN ghép đôi
+  lastRx = Date.now();
+  setConnected(true);
+  log('Đã kết nối ' + device.name);
+}
+
+async function reconnectLoop() {
+  let wait = 1000;
+  while (device && !device.gatt.connected && !manualDisconnect) {
+    try { await openGatt(); log('Đã kết nối lại'); return; } catch (e) {}
+    await new Promise(r => setTimeout(r, wait));
+    wait = Math.min(wait * 2, 10000);
+  }
+}
+
+function onDisconnected() {
+  chCmd = null;
+  setConnected(false);
+  if (manualDisconnect) { log('Đã ngắt kết nối'); return; }
+  log('Mất kết nối');
+  lostAlarm('Mất kết nối Bluetooth với xe.');
+  reconnectLoop();
+}
+
+// Phát hiện mất tín hiệu sớm hơn sự kiện ngắt kết nối của trình duyệt
+setInterval(() => {
+  if (device && device.gatt.connected && lastRx && Date.now() - lastRx > STALE_MS) {
+    lostAlarm('Không nhận được tín hiệu từ xe.');
+  }
+}, 1000);
+
+$('btnConnect').onclick = async () => {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (window.Notification && Notification.permission === 'default') Notification.requestPermission();
+  if (device && device.gatt.connected) {
+    manualDisconnect = true;
+    device.gatt.disconnect();
+    return;
+  }
+  try {
+    manualDisconnect = false;
+    if (!device) {
+      device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+      device.addEventListener('gattserverdisconnected', onDisconnected);
+    }
+    await openGatt();
+    keepAwake();
+  } catch (e) {
+    log('Lỗi: ' + e.message);
+  }
+};
+
+$('btnFind').onclick = () => send('FIND').catch(e => log('Lỗi: ' + e.message));
+$('btnPin').onclick = () => {
+  const p = $('newPin').value;
+  if (!/^[1-9]\d{5}$/.test(p)) return log('PIN phải gồm 6 chữ số, không bắt đầu bằng 0');
+  send('PIN:' + p).then(() => log('Đã đổi PIN, dùng PIN mới cho lần ghép đôi sau'))
+                  .catch(e => log('Lỗi: ' + e.message));
+};
+$('btnUnpair').onclick = () => {
+  if (!confirm('Xoá mọi thiết bị đã ghép? Bạn sẽ phải ghép đôi lại bằng PIN.')) return;
+  manualDisconnect = true;
+  send('UNPAIR').catch(() => {});
+};
+
+$('support').textContent = navigator.bluetooth
+  ? 'Giữ trang này mở và màn hình sáng khi đang canh xe.'
+  : '⚠️ Trình duyệt không hỗ trợ Web Bluetooth. Dùng Chrome trên Android/PC, hoặc ứng dụng Bluefy trên iPhone.';
+</script>
+</body>
+</html>
