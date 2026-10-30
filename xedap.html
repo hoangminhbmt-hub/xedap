@@ -279,24 +279,46 @@ async function openGatt() {
   const chSt = await svc.getCharacteristic(ST);
   chCmd = await svc.getCharacteristic(CMD);
   rxCount = 0;
-  chSt.addEventListener('characteristicvaluechanged', e => onStatus(new TextDecoder().decode(e.target.value)));
-  // Đọc đặc tính đã mã hoá để buộc điện thoại/máy tính hiện ô nhập mã PIN
-  try {
-    const t = new TextDecoder().decode(await chSt.readValue());
-    if (t.includes(',')) onStatus(t);
-  } catch (e) {
-    log('Chưa ghép đôi: ' + e.message);
+  if (!chSt._xdListen) {
+    chSt.addEventListener('characteristicvaluechanged', e => onStatus(new TextDecoder().decode(e.target.value)));
+    chSt._xdListen = true;
   }
-  await chSt.startNotifications();
   lastRx = Date.now();
   setConnected(true);
   log('Đã kết nối ' + device.name);
-  setTimeout(checkPaired, 5000);
+  setTimeout(checkPaired, 8000);
+
+  // Đọc đặc tính đã mã hoá để điện thoại tự hỏi mã PIN. Trong lúc ghép đôi,
+  // Android báo lỗi "already in progress" nên phải thử lại vài lần.
+  try {
+    const t = new TextDecoder().decode(await withRetry(() => chSt.readValue(), 'Đọc dữ liệu'));
+    if (t.includes(',')) onStatus(t);
+  } catch (e) {
+    log('Chưa đọc được dữ liệu: ' + e.message);
+  }
+  try {
+    await withRetry(() => chSt.startNotifications(), 'Bật nhận dữ liệu');
+  } catch (e) {
+    log('Chưa bật được nhận dữ liệu: ' + e.message);
+  }
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Thử lại tối đa ~30 giây (đủ thời gian nhập PIN), dừng nếu đã mất kết nối
+async function withRetry(fn, label, tries = 15) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (!device || !device.gatt.connected || i >= tries - 1) throw e;
+      if (i === 0) log(`${label}: ${e.message} – đang thử lại, hãy nhập PIN nếu được hỏi`);
+      await sleep(2000);
+    }
+  }
 }
 
 function checkPaired() {
   if (device && device.gatt.connected && rxCount === 0) {
-    log('⚠ Kết nối 5 giây nhưng chưa có dữ liệu – chưa ghép đôi');
+    log('⚠ Đã kết nối nhưng chưa có dữ liệu – chưa ghép đôi');
     setSupport(PAIR_HINT, true);
   }
 }
@@ -305,7 +327,7 @@ async function reconnectLoop() {
   let wait = 1000;
   while (device && !device.gatt.connected && !manualDisconnect) {
     try { await openGatt(); log('Đã kết nối lại'); return; } catch (e) {}
-    await new Promise(r => setTimeout(r, wait));
+    await sleep(wait);
     wait = Math.min(wait * 2, 10000);
   }
 }
