@@ -1,28 +1,50 @@
 /*
  * XeDap Guard - Báo mất xe đạp qua Bluetooth LE (ESP32-C3)
  *
+ * CHƯA KIỂM THỬ TRÊN XE THẬT. Ngưỡng rung và các thanh ghi MPU6050 cần chỉnh khi thử.
+ *
  * Phần cứng : ESP32-C3 SuperMini + pin 18650 (nối chân 5V/GND)
  *             Cầu chia đo pin: Pin(+) ─ 220k ─ GPIO3 ─ 220k ─ GND
+ *             Cảm biến rung MPU6050: SDA GPIO4, SCL GPIO5, INT GPIO0
  * Board     : ESP32C3 Dev Module, Arduino-ESP32 core >= 3.0, USB CDC On Boot: Enabled
  * Thư viện  : NimBLE-Arduino >= 2.1 (h2zero)
  *
- * Thiết bị chỉ phát Bluetooth và gửi trạng thái mỗi giây. Việc báo động khi
- * mất kết nối / tín hiệu yếu do điện thoại đảm nhận (app/xedap.html).
+ * Hoạt động:
+ *  - Bật máy, hoặc bị rung khi đang ngủ: xe thức dậy và bật Bluetooth.
+ *  - Không có điện thoại kết nối trong SLEEP_AFTER_MS: xe tự ngủ lại.
+ *  - Có điện thoại kết nối: xe hoạt động đến khi nhận lệnh SLEEP.
+ *  - Khi đang khóa (ARM), mỗi lần rung được đếm và cờ 'T' được gửi kèm.
  *
- * Gói trạng thái (notify, 1 giây/lần): "<pin %>,<pin mV>,<rssi>,<cờ>"
- *   vd "87,4050,-62,-"   pin % = -1 khi không lắp cầu chia
- *   cờ: '-' bình thường, 'L' pin yếu, 'S' pin cạn -> thiết bị sắp ngủ sâu
- * Lệnh (write): "FIND", "PIN:654321", "UNPAIR"
+ * Gói trạng thái (notify, 1 giây/lần): "<pin %>,<pin mV>,<rssi>,<cờ>,<số lần rung>"
+ *   vd "87,4050,-62,-,0"   pin % = -1 khi không lắp cầu chia
+ *   cờ: '-' bình thường, 'L' pin yếu, 'S' pin cạn, 'T' có rung khi đang khóa
+ * Lệnh (write): "FIND", "PIN:654321", "UNPAIR", "ARM", "DISARM", "SLEEP"
  */
 #include <Arduino.h>
+#include <Wire.h>
 #include <Preferences.h>
 #include <NimBLEDevice.h>
+#include <esp_sleep.h>
 #include <esp_system.h>
+#include "driver/rtc_io.h"
 
 // ---------- Cấu hình ----------
 constexpr int PIN_LED = 8;   // LED onboard, sáng ở mức LOW
 constexpr int PIN_VBAT = 3;  // giữa cầu chia 220k / 220k
 constexpr float VBAT_RATIO = 2.0f;
+
+// MPU6050
+constexpr int PIN_SDA = 4;
+constexpr int PIN_SCL = 5;
+constexpr gpio_num_t PIN_MPU_INT = GPIO_NUM_0;  // chân ngắt, dùng để đánh thức
+constexpr uint8_t MPU_ADDR = 0x68;
+constexpr uint8_t MOT_THRESHOLD = 20;   // đơn vị 2 mg -> khoảng 40 mg, chỉnh khi thử
+constexpr uint8_t MOT_DURATION = 1;     // ms
+constexpr uint8_t LP_WAKE_5HZ = 1;      // LP_WAKE_CTRL: 0=1.25Hz, 1=5Hz, 2=20Hz, 3=40Hz
+
+// Thời gian chờ điện thoại kết nối sau khi thức dậy (hoặc sau khi mất kết nối)
+constexpr uint32_t SLEEP_AFTER_MS = 60000;
+
 // Không đặt mã cố định trong mã nguồn. Lần chạy đầu tiên sẽ tự sinh mã
 // ngẫu nhiên, lưu vào bộ nhớ của xe và in ra cổng Serial.
 
@@ -55,6 +77,62 @@ int8_t rssiNow = 0;
 uint8_t emptyCount = 0;
 uint32_t findUntil = 0;
 
+bool armed = true;          // đang khóa: rung mới được tính
+bool theftFlag = false;     // đã có rung khi đang khóa
+uint16_t theftCount = 0;    // số lần rung trong phiên thức này
+uint32_t lastLinkMs = 0;    // lần cuối còn điện thoại kết nối
+bool sleepRequested = false;
+
+// =====================================================================
+//  MPU6050 (cảm biến rung)
+// =====================================================================
+void mpuWrite(uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(reg);
+  Wire.write(val);
+  Wire.endTransmission();
+}
+
+uint8_t mpuRead(uint8_t reg) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(reg);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU_ADDR, (uint8_t)1);
+  return Wire.available() ? Wire.read() : 0;
+}
+
+// Cấu hình phát hiện chuyển động ở chế độ chu kỳ (tiết kiệm pin)
+bool initMotionSensor() {
+  Wire.begin(PIN_SDA, PIN_SCL);
+  Wire.setClock(100000);
+  mpuWrite(0x6B, 0x00);            // đánh thức chip, dùng xung nội
+  delay(10);
+  if (mpuRead(0x75) != 0x68) return false;  // WHO_AM_I: không thấy MPU6050
+
+  mpuWrite(0x1A, 0x01);            // CONFIG: DLPF
+  mpuWrite(0x1C, 0x01);            // ACCEL_CONFIG: ±2g, lọc trọng lực (HPF 5 Hz)
+  mpuWrite(0x1F, MOT_THRESHOLD);   // MOT_THR
+  mpuWrite(0x20, MOT_DURATION);    // MOT_DUR
+  mpuWrite(0x69, 0x15);            // MOT_DETECT_CTRL
+  mpuWrite(0x37, 0x20);            // INT_PIN_CFG: giữ mức INT đến khi đọc INT_STATUS
+  mpuWrite(0x38, 0x40);            // INT_ENABLE: báo chuyển động
+  mpuWrite(0x6C, (LP_WAKE_5HZ << 6) | 0x07);  // tắt gyro, giữ accel
+  mpuWrite(0x6B, 0x20 | 0x08);     // CYCLE bật, TEMP_DIS
+  mpuRead(0x3A);                   // xoá cờ cũ
+  return true;
+}
+
+// Nếu có rung, đọc INT_STATUS để xoá cờ, rồi đếm nếu đang khóa
+void checkVibration() {
+  if (digitalRead(PIN_MPU_INT) != HIGH) return;
+  uint8_t st = mpuRead(0x3A);
+  if ((st & 0x40) && armed) {
+    if (theftCount < 65535) theftCount++;
+    theftFlag = true;
+    Serial.printf("Rung khi dang khoa, lan %u\n", theftCount);
+  }
+}
+
 // =====================================================================
 //  Pin
 // =====================================================================
@@ -75,11 +153,27 @@ int batteryPercent(uint16_t mv) {
   return 100;
 }
 
+// Ngủ sâu không có nguồn đánh thức: chỉ chạy lại khi tháo/lắp pin
 void deepSleepForever() {
   Serial.println("Pin can -> ngu sau. Thay pin da sac de chay lai.");
   Serial.flush();
   digitalWrite(PIN_LED, HIGH);
-  esp_deep_sleep_start();  // không đặt nguồn đánh thức: chỉ chạy lại khi tháo/lắp pin
+  esp_deep_sleep_start();
+}
+
+// Ngủ sâu, rung cảm biến sẽ đánh thức
+[[noreturn]] void enterDeepSleep() {
+  Serial.println("Ngu sau. Rung xe de danh thuc.");
+  Serial.flush();
+  NimBLEDevice::getAdvertising()->stop();
+  if (connHandle != BLE_HS_CONN_HANDLE_NONE) server->disconnect(connHandle);
+  delay(200);                      // chờ gói ngắt kết nối đi hết
+  mpuRead(0x3A);                   // xoá cờ rung đang chờ, tránh đánh thức ngay
+  digitalWrite(PIN_LED, HIGH);
+  rtc_gpio_pullup_dis(PIN_MPU_INT);
+  rtc_gpio_pulldown_en(PIN_MPU_INT);
+  esp_sleep_enable_ext1_wakeup(1ULL << PIN_MPU_INT, ESP_EXT1_WAKEUP_ANY_HIGH);
+  esp_deep_sleep_start();
 }
 
 // =====================================================================
@@ -87,8 +181,10 @@ void deepSleepForever() {
 // =====================================================================
 void sendStatus(char flag) {
   if (!bleAuthed || !chStatus) return;
-  char buf[24];
-  int n = snprintf(buf, sizeof(buf), "%d,%u,%d,%c", batteryPercent(vbatMv), vbatMv, rssiNow, flag);
+  char c = theftFlag ? 'T' : flag;
+  char buf[32];
+  int n = snprintf(buf, sizeof(buf), "%d,%u,%d,%c,%u", batteryPercent(vbatMv), vbatMv,
+                   rssiNow, c, theftCount);
   chStatus->setValue((uint8_t*)buf, n);
   chStatus->notify();
 }
@@ -173,6 +269,15 @@ void handleCommand(char* c) {
     // Xoá mọi thiết bị đã ghép, điện thoại hiện tại cũng phải ghép lại
     NimBLEDevice::deleteAllBonds();
     if (connHandle != BLE_HS_CONN_HANDLE_NONE) server->disconnect(connHandle);
+  } else if (!strcmp(c, "ARM")) {
+    armed = true;
+  } else if (!strcmp(c, "DISARM")) {
+    // Đang đi xe: không tính rung, xoá cờ báo động cũ
+    armed = false;
+    theftFlag = false;
+    theftCount = 0;
+  } else if (!strcmp(c, "SLEEP")) {
+    sleepRequested = true;
   }
 }
 
@@ -233,6 +338,8 @@ void setup() {
   vbatMv = readVbatMv();
   if (vbatMv >= VBAT_NONE_MV && vbatMv < VBAT_EMPTY_MV) deepSleepForever();
 
+  bool byVibration = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1;
+
   prefs.begin("xedap", false);
   pairPin = prefs.getUInt("pin", 0);
   if (pairPin < 100000 || pairPin > 999999) {  // chưa có mã hợp lệ: sinh mã mới
@@ -241,8 +348,18 @@ void setup() {
   }
   prefs.end();
 
+  pinMode(PIN_MPU_INT, INPUT_PULLDOWN);
+  if (!initMotionSensor()) Serial.println("Khong tim thay MPU6050 - kiem tra day SDA/SCL");
+
+  if (byVibration && armed) {  // thức dậy vì rung khi đang khóa
+    theftFlag = true;
+    theftCount = 1;
+    Serial.println("Thuc day do rung");
+  }
+
   cmdQueue = xQueueCreate(4, sizeof(Cmd));
   setupBle();
+  lastLinkMs = millis();
 
   Serial.printf("XeDap san sang. Pin %u mV (%d%%), PIN ghep doi: %06lu\n", vbatMv,
                 batteryPercent(vbatMv), (unsigned long)pairPin);
@@ -262,10 +379,16 @@ void loop() {
     sendStatus('-');
   }
 
+  checkVibration();
+
   if (millis() - tSlow >= 1000) {
     tSlow = millis();
     slowTasks();
   }
+
+  // Còn điện thoại kết nối thì giữ thức. Không có điện thoại đủ lâu thì ngủ lại.
+  if (connHandle != BLE_HS_CONN_HANDLE_NONE) lastLinkMs = millis();
+  if (sleepRequested || millis() - lastLinkMs > SLEEP_AFTER_MS) enterDeepSleep();
 
   updateLed();
   delay(10);

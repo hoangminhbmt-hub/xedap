@@ -13,8 +13,20 @@ Báo mất xe đạp qua Bluetooth LE. Firmware ESP32-C3 phát trạng thái, gi
 - UUID dịch vụ: `6e7a1001-3c2b-4b8e-9a1f-58c5e1a0b001`
   - Trạng thái (notify): `6e7a1002-...`
   - Lệnh (write): `6e7a1003-...`
-- Gói trạng thái: `"<pin %>,<pin mV>,<rssi>,<cờ>"`, ví dụ `"87,4050,-62,-"`. Cờ: `-` bình thường, `L` pin yếu, `S` pin cạn.
-- Lệnh: `FIND`, `PIN:<6 số>`, `UNPAIR`.
+- Gói trạng thái: `"<pin %>,<pin mV>,<rssi>,<cờ>,<số lần rung>"`, ví dụ `"87,4050,-62,-,0"`.
+  - Cờ: `-` bình thường, `L` pin yếu, `S` pin cạn, `T` có rung khi đang khóa.
+  - Số lần rung: đếm trong phiên thức hiện tại, không lưu qua lần ngủ.
+- Lệnh: `FIND`, `PIN:<6 số>`, `UNPAIR`, `ARM`, `DISARM`, `SLEEP`.
+  - `ARM`/`DISARM`: đồng bộ với nút "Canh xe" trên giao diện. Khi `DISARM`, xe xoá cờ `T` và số lần rung.
+  - `SLEEP`: xe ngắt kết nối và ngủ sâu. Giao diện phải đặt `manualDisconnect` trước khi gửi để không báo "mất kết nối".
+
+## Hành vi nguồn điện và rung
+- Bật máy hoặc bị rung khi đang ngủ: xe thức, bật Bluetooth.
+- Không có điện thoại kết nối trong `SLEEP_AFTER_MS` (60 giây): xe tự ngủ lại.
+- Đang có điện thoại kết nối: xe giữ thức cho đến khi nhận `SLEEP`.
+- Cảm biến rung MPU6050 nối I2C (SDA GPIO4, SCL GPIO5) và chân ngắt INT GPIO0. INT đánh thức chip khi ngủ.
+- Khi pin cạn (dưới 3300 mV), xe ngủ sâu không có nguồn đánh thức. Chỉ chạy lại khi thay pin.
+- Trạng thái `armed` và cờ `T` không được lưu sau khi ngủ. Khi thức do rung, xe mặc định là đang khóa.
 
 Nếu đổi bất kỳ điều nào ở trên, phải sửa cả firmware lẫn `xedap.html` trong cùng một lần commit.
 

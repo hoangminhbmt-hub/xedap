@@ -70,6 +70,9 @@
 
   <div class="card">
     <button id="btnFind" disabled>💡 Tìm xe (đèn trên mạch nháy 10 giây)</button>
+    <p></p>
+    <button id="btnSleep" disabled>😴 Đưa xe vào chế độ ngủ (tiết kiệm pin)</button>
+    <p class="hint">Khi ngủ, rung xe để đánh thức. Nếu không có điện thoại kết nối trong 60 giây, xe tự ngủ lại.</p>
   </div>
 
   <div class="card">
@@ -114,7 +117,7 @@ const SUPPORT_OK = 'Giữ trang này mở và màn hình sáng khi đang canh xe
 const PAIR_HINT = '⚠ Chưa ghép đôi với xe nên chưa nhận được dữ liệu. ' +
   'Điện thoại: nhập mã PIN khi được hỏi. ' +
   'Máy tính Windows: vào Cài đặt → Bluetooth → Thêm thiết bị → chọn XeDap → nhập PIN, rồi bấm Kết nối lại.';
-let weakCount = 0, earlyWarned = false, lowBattWarned = false;
+let weakCount = 0, earlyWarned = false, lowBattWarned = false, theftWarned = false, lastCount = 0;
 let audioCtx = null, siren = null, wakeLock = null;
 
 // ---------- Lưu cài đặt trên máy (không bắt buộc) ----------
@@ -136,7 +139,7 @@ function setConnected(on) {
   $('dot').classList.toggle('on', on);
   $('connText').textContent = on ? 'Đã kết nối' : (device ? 'Đang tìm lại xe…' : 'Chưa kết nối');
   $('btnConnect').textContent = on ? 'Ngắt kết nối' : 'Kết nối với xe';
-  ['btnFind', 'btnPin', 'btnUnpair'].forEach(id => $(id).disabled = !on);
+  ['btnFind', 'btnPin', 'btnUnpair', 'btnSleep'].forEach(id => $(id).disabled = !on);
   updateGuardText();
 }
 
@@ -162,6 +165,9 @@ $('guard').onchange = () => {
   updateGuardText();
   weakCount = 0; earlyWarned = false; lostAlarmed = false;
   log(on ? 'Bật canh xe' : 'Tắt canh xe');
+  // Đồng bộ với xe: khi tắt canh thì xe không tính rung nữa
+  if (device && device.gatt.connected) send(on ? 'ARM' : 'DISARM').catch(() => {});
+  if (!on) theftWarned = false;
   if (on && !(device && device.gatt.connected)) raiseAlarm('📡 CHƯA KẾT NỐI', 'Bạn đang bật canh xe nhưng chưa kết nối với xe.');
 };
 
@@ -214,7 +220,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && device) keepAwake();
 });
 
-// ---------- Xử lý trạng thái từ xe: "pin%,mV,rssi,cờ" ----------
+// ---------- Xử lý trạng thái từ xe: "pin%,mV,rssi,cờ,số lần rung" ----------
 function onStatus(text) {
   lastRx = Date.now();
   lostAlarmed = false;
@@ -223,7 +229,8 @@ function onStatus(text) {
     updateGuardText();
     log('Đã ghép đôi, đang nhận dữ liệu từ xe');
   }
-  const [pct, mv, rssi, flag] = text.split(',');
+  const [pct, mv, rssi, flag, cnt] = text.split(',');
+  const count = Number(cnt || 0);
   const p = Number(pct), r = Number(rssi);
 
   if (p >= 0) {
@@ -258,6 +265,19 @@ function onStatus(text) {
     $('guard').checked = false; $('guard').onchange();
     raiseAlarm('🔋 PIN CẠN', 'Pin trên xe đã cạn, thiết bị tắt để bảo vệ pin. Đã tự tắt canh xe để không báo nhầm.');
   }
+
+  // Xe bị rung khi đang khóa: báo một lần, cập nhật số lần khi có rung mới
+  if (flag === 'T') {
+    if (!theftWarned) {
+      theftWarned = true;
+      raiseAlarm('🚨 XE BỊ RUNG', `Xe bị rung khi đang khóa (${count} lần). Kiểm tra xe ngay!`);
+    } else if (count !== lastCount) {
+      log(`Xe bị rung thêm: tổng ${count} lần`);
+    }
+  } else {
+    theftWarned = false;
+  }
+  lastCount = count;
 }
 
 function lostAlarm(reason) {
@@ -371,6 +391,13 @@ $('btnConnect').onclick = async () => {
 };
 
 $('btnFind').onclick = () => send('FIND').catch(e => log('Lỗi: ' + e.message));
+$('btnSleep').onclick = () => {
+  if (!confirm('Đưa xe vào chế độ ngủ? Muốn đánh thức, rung xe.')) return;
+  // Tắt canh và ngắt có chủ đích, để không báo "mất kết nối" khi xe ngủ
+  $('guard').checked = false; updateGuardText();
+  manualDisconnect = true;
+  send('SLEEP').then(() => log('Xe đang ngủ')).catch(e => log('Lỗi: ' + e.message));
+};
 $('btnPin').onclick = () => {
   const p = $('newPin').value;
   if (!/^[1-9]\d{5}$/.test(p)) return log('PIN phải gồm 6 chữ số, không bắt đầu bằng 0');
