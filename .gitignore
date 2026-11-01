@@ -1,0 +1,12 @@
+# Thông tin bí mật — không đưa lên kho
+secrets.h
+*.local.h
+.env
+*.key
+*.pem
+
+# Tệp sinh ra khi biên dịch
+build/
+*.bin
+*.elf
+*.map
