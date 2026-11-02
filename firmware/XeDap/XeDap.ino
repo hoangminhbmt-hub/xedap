@@ -50,7 +50,7 @@ constexpr uint32_t SLEEP_AFTER_MS = 60000;
 
 constexpr uint16_t VBAT_NONE_MV = 2500;   // thấp hơn = không lắp cầu chia
 constexpr uint16_t VBAT_LOW_MV = 3600;    // ~20% -> báo pin yếu
-constexpr uint16_t VBAT_EMPTY_MV = 3300;  // -> ngủ sâu để bảo vệ pin
+constexpr uint16_t VBAT_EMPTY_MV = 3500;  // -> ngủ sâu để bảo vệ pin (3 viên song song, không mạch bảo vệ)
 
 constexpr char DEVICE_NAME[] = "XeDap";
 

@@ -25,7 +25,9 @@ Báo mất xe đạp qua Bluetooth LE. Firmware ESP32-C3 phát trạng thái, gi
 - Không có điện thoại kết nối trong `SLEEP_AFTER_MS` (60 giây): xe tự ngủ lại.
 - Đang có điện thoại kết nối: xe giữ thức cho đến khi nhận `SLEEP`.
 - Cảm biến rung MPU6050 nối I2C (SDA GPIO4, SCL GPIO5) và chân ngắt INT GPIO0. INT đánh thức chip khi ngủ.
-- Khi pin cạn (dưới 3300 mV), xe ngủ sâu không có nguồn đánh thức. Chỉ chạy lại khi thay pin.
+- Khi pin cạn (dưới 3500 mV, giữ liên tục 10 giây), xe ngủ sâu không có nguồn đánh thức. Chỉ chạy lại khi thay pin.
+- Nguồn: 3 viên 18650 song song, cùng hãng, sạc ngoài (tháo pin ra). Không có mạch bảo vệ pin và không có mạch sạc trên xe. Pin nối chân 5V của bo.
+- Xe không có công tắc nguồn cứng. Bật bằng rung khi đang ngủ, tắt bằng lệnh SLEEP hoặc tự ngủ sau 60 giây không có điện thoại.
 - Trạng thái `armed` và cờ `T` không được lưu sau khi ngủ. Khi thức do rung, xe mặc định là đang khóa.
 
 Nếu đổi bất kỳ điều nào ở trên, phải sửa cả firmware lẫn `xedap.html` trong cùng một lần commit.
