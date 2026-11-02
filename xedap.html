@@ -77,6 +77,17 @@
 
   <div class="card">
     <details>
+      <summary>⬆️ Cập nhật firmware</summary>
+      <p class="hint">Chọn file .bin đã biên dịch. Giữ điện thoại gần xe và xe đang thức trong lúc cập nhật, khoảng vài phút.</p>
+      <input id="otaFile" type="file" accept=".bin">
+      <p></p>
+      <button id="btnOta" disabled>Cập nhật xe</button>
+      <p class="hint" id="otaProg"></p>
+    </details>
+  </div>
+
+  <div class="card">
+    <details>
       <summary>⚙️ Cài đặt</summary>
       <label><span>Cảnh báo sớm khi tín hiệu yếu hơn</span><b id="earlyVal"></b></label>
       <input id="early" type="range" min="-100" max="-60" step="1" style="width:100%">
@@ -107,6 +118,9 @@
 const SVC = '6e7a1001-3c2b-4b8e-9a1f-58c5e1a0b001';
 const ST  = '6e7a1002-3c2b-4b8e-9a1f-58c5e1a0b001';
 const CMD = '6e7a1003-3c2b-4b8e-9a1f-58c5e1a0b001';
+const OTA_CTRL = '6e7a1004-3c2b-4b8e-9a1f-58c5e1a0b001';
+const OTA_DATA = '6e7a1005-3c2b-4b8e-9a1f-58c5e1a0b001';
+let chOtaCtrl = null, chOtaData = null, otaBusy = false;
 const STALE_MS = 6000;      // không nhận dữ liệu quá 6 giây = mất tín hiệu
 const EARLY_COUNT = 3;      // tín hiệu yếu liên tục 3 giây mới cảnh báo sớm
 
@@ -139,7 +153,7 @@ function setConnected(on) {
   $('dot').classList.toggle('on', on);
   $('connText').textContent = on ? 'Đã kết nối' : (device ? 'Đang tìm lại xe…' : 'Chưa kết nối');
   $('btnConnect').textContent = on ? 'Ngắt kết nối' : 'Kết nối với xe';
-  ['btnFind', 'btnPin', 'btnUnpair', 'btnSleep'].forEach(id => $(id).disabled = !on);
+  ['btnFind', 'btnPin', 'btnUnpair', 'btnSleep', 'btnOta'].forEach(id => $(id).disabled = !on);
   updateGuardText();
 }
 
@@ -298,6 +312,12 @@ async function openGatt() {
   const svc = await server.getPrimaryService(SVC);
   const chSt = await svc.getCharacteristic(ST);
   chCmd = await svc.getCharacteristic(CMD);
+  try {
+    chOtaCtrl = await svc.getCharacteristic(OTA_CTRL);
+    chOtaData = await svc.getCharacteristic(OTA_DATA);
+  } catch (e) {
+    chOtaCtrl = null; chOtaData = null;  // firmware cũ chưa có cập nhật qua Bluetooth
+  }
   rxCount = 0;
   if (!chSt._xdListen) {
     chSt.addEventListener('characteristicvaluechanged', e => onStatus(new TextDecoder().decode(e.target.value)));
@@ -353,7 +373,7 @@ async function reconnectLoop() {
 }
 
 function onDisconnected() {
-  chCmd = null;
+  chCmd = null; chOtaCtrl = null; chOtaData = null;
   setConnected(false);
   if (manualDisconnect) { log('Đã ngắt kết nối'); return; }
   log('Mất kết nối');
@@ -408,6 +428,80 @@ $('btnUnpair').onclick = () => {
   if (!confirm('Xoá mọi thiết bị đã ghép? Bạn sẽ phải ghép đôi lại bằng PIN.')) return;
   manualDisconnect = true;
   send('UNPAIR').catch(() => {});
+};
+
+// ---------- Cập nhật firmware qua Bluetooth ----------
+// CRC32, cùng thuật toán với firmware
+function crc32Update(crc, bytes) {
+  crc = (~crc) >>> 0;
+  for (const b of bytes) {
+    crc ^= b;
+    for (let k = 0; k < 8; k++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xEDB88320) : (crc >>> 1);
+  }
+  return (~crc) >>> 0;
+}
+
+// Chờ phản hồi "OK" hoặc "ERR:..." từ xe. Phải gọi trước khi gửi lệnh.
+function waitOta(timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chOtaCtrl.removeEventListener('characteristicvaluechanged', onNote);
+      reject(new Error('Hết thời gian chờ xe trả lời'));
+    }, timeoutMs);
+    function onNote(e) {
+      const msg = new TextDecoder().decode(e.target.value);
+      clearTimeout(timer);
+      chOtaCtrl.removeEventListener('characteristicvaluechanged', onNote);
+      if (msg === 'OK') resolve();
+      else reject(new Error(msg.replace(/^ERR:/, '')));
+    }
+    chOtaCtrl.addEventListener('characteristicvaluechanged', onNote);
+  });
+}
+
+async function sendOta(file) {
+  if (!chOtaCtrl || !chOtaData) throw new Error('Xe chưa có cập nhật qua Bluetooth. Cần nạp bản đầu tiên qua USB.');
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const crc = crc32Update(0, buf);
+  const enc = new TextEncoder();
+  await chOtaCtrl.startNotifications();
+
+  let p = waitOta();
+  await chOtaCtrl.writeValueWithResponse(enc.encode(`START:${buf.length}:${crc.toString(16)}`));
+  await p;
+
+  const CHUNK = 100;  // byte mỗi đoạn, nằm trong giới hạn gói Bluetooth thường gặp
+  for (let off = 0; off < buf.length; off += CHUNK) {
+    const end = Math.min(off + CHUNK, buf.length);
+    await chOtaData.writeValueWithResponse(buf.subarray(off, end));
+    $('otaProg').textContent = `Đã gửi ${Math.round(100 * end / buf.length)}%`;
+  }
+
+  manualDisconnect = true;  // xe sẽ khởi động lại, không báo mất kết nối
+  p = waitOta();
+  await chOtaCtrl.writeValueWithResponse(enc.encode('END'));
+  await p;
+}
+
+$('btnOta').onclick = async () => {
+  const f = $('otaFile').files[0];
+  if (!f) return log('Chưa chọn file .bin');
+  if (!confirm('Cập nhật firmware cho xe? Giữ điện thoại gần xe trong lúc cập nhật.')) return;
+  if (otaBusy) return;
+  otaBusy = true;
+  $('btnOta').disabled = true;
+  try {
+    log('Bắt đầu cập nhật ' + f.name);
+    await sendOta(f);
+    log('Cập nhật xong. Xe đang khởi động lại, bấm Kết nối lại sau vài giây.');
+    $('otaProg').textContent = 'Xong. Bấm Kết nối lại.';
+  } catch (e) {
+    log('Lỗi cập nhật: ' + e.message);
+    $('otaProg').textContent = 'Lỗi: ' + e.message;
+  } finally {
+    otaBusy = false;
+    $('btnOta').disabled = !(device && device.gatt.connected);
+  }
 };
 
 if (navigator.bluetooth) setSupport(SUPPORT_OK, false);
