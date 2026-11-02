@@ -7,7 +7,7 @@ Báo mất xe đạp qua Bluetooth LE. Firmware ESP32-C3 phát trạng thái, gi
 - `firmware/XeDap/XeDap.ino` — firmware ESP32-C3 (NimBLE-Arduino).
 - `xedap.html` — giao diện Web Bluetooth (Chrome Android/PC). Tệp đơn, không có bước build.
 - `manifest.json`, `icon-192.png`, `icon-512.png` — cài đặt như ứng dụng.
-- `docs/so-do-noi-day.svg` — sơ đồ đấu nối.
+- `docs/so-do-noi-day-v1.2.svg` và `.pdf` — sơ đồ đấu nối A4 (bản để in). Mọi thay đổi đấu nối phải cập nhật bản vẽ này.
 
 ## Định dạng dữ liệu (phải khớp giữa hai bên)
 - UUID dịch vụ: `6e7a1001-3c2b-4b8e-9a1f-58c5e1a0b001`

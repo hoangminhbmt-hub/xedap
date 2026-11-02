@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="595pt" height="842pt" viewBox="0 0 1190 1684" font-family="DejaVu Sans, Verdana, Arial, sans-serif">
+<rect width="1190" height="1684" fill="#fff"/>
+<text x="595" y="60" font-size="38" font-weight="bold" text-anchor="middle" fill="#000">XE ĐẠP ESP32-C3 · SƠ ĐỒ NỐI DÂY v1.2</text>
+<text x="595" y="100" font-size="21" text-anchor="middle" fill="#000">ESP32-C3 · MPU6050 · 3 × 18650 song song 3,7V · sạc ngoài</text>
+<rect x="430" y="150" width="330" height="1180" rx="24" fill="#fff" stroke="#000" stroke-width="8"/>
+<text x="595" y="200" font-size="26" font-weight="bold" text-anchor="middle" fill="#000">ESP32-C3 SuperMini</text>
+<rect x="460" y="260" width="120" height="50" rx="8" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="520" y="282" font-size="24" font-weight="bold" text-anchor="middle" fill="#000">5V</text>
+<text x="520" y="301" font-size="15" text-anchor="middle" fill="#000">+ pin</text>
+<rect x="460" y="350" width="120" height="50" rx="8" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="520" y="372" font-size="24" font-weight="bold" text-anchor="middle" fill="#000">GND</text>
+<text x="520" y="391" font-size="15" text-anchor="middle" fill="#000">− pin</text>
+<rect x="460" y="440" width="120" height="50" rx="8" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="520" y="462" font-size="24" font-weight="bold" text-anchor="middle" fill="#000">3V3</text>
+<text x="520" y="481" font-size="15" text-anchor="middle" fill="#000">→ VCC MPU</text>
+<rect x="610" y="260" width="120" height="50" rx="8" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="670" y="282" font-size="22" font-weight="bold" text-anchor="middle" fill="#000">GPIO0</text>
+<text x="670" y="301" font-size="15" text-anchor="middle" fill="#000">INT rung</text>
+<rect x="610" y="350" width="120" height="50" rx="8" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="670" y="372" font-size="22" font-weight="bold" text-anchor="middle" fill="#000">GPIO4</text>
+<text x="670" y="391" font-size="15" text-anchor="middle" fill="#000">SDA</text>
+<rect x="610" y="440" width="120" height="50" rx="8" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="670" y="462" font-size="22" font-weight="bold" text-anchor="middle" fill="#000">GPIO5</text>
+<text x="670" y="481" font-size="15" text-anchor="middle" fill="#000">SCL</text>
+<rect x="610" y="530" width="120" height="50" rx="8" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="670" y="552" font-size="22" font-weight="bold" text-anchor="middle" fill="#000">GPIO3</text>
+<text x="670" y="571" font-size="15" text-anchor="middle" fill="#000">đo pin</text>
+<line x1="730" y1="285" x2="800" y2="285" stroke="#000" stroke-width="4"/>
+<line x1="730" y1="375" x2="800" y2="375" stroke="#000" stroke-width="4"/>
+<line x1="730" y1="465" x2="800" y2="465" stroke="#000" stroke-width="4"/>
+<line x1="730" y1="555" x2="770" y2="555" stroke="#000" stroke-width="4"/>
+<line x1="770" y1="555" x2="770" y2="780" stroke="#000" stroke-width="4"/>
+<line x1="770" y1="780" x2="960" y2="780" stroke="#000" stroke-width="4"/>
+<line x1="340" y1="285" x2="460" y2="285" stroke="#000" stroke-width="7"/>
+<line x1="340" y1="375" x2="460" y2="375" stroke="#000" stroke-width="7"/>
+<rect x="40" y="200" width="300" height="300" rx="14" fill="#fff" stroke="#000" stroke-width="5"/>
+<text x="190" y="235" font-size="17" font-weight="bold" text-anchor="middle" fill="#000">PIN 3 × 18650 SONG SONG</text>
+<text x="190" y="262" font-size="17" text-anchor="middle" fill="#000">3,7V · cùng hãng · sạc ngoài</text>
+<rect x="70" y="300" width="60" height="150" rx="10" fill="#eef" stroke="#000" stroke-width="3"/>
+<rect x="150" y="300" width="60" height="150" rx="10" fill="#eef" stroke="#000" stroke-width="3"/>
+<rect x="230" y="300" width="60" height="150" rx="10" fill="#eef" stroke="#000" stroke-width="3"/>
+<text x="330" y="282" font-size="24" font-weight="bold" text-anchor="end" fill="#000">+</text>
+<text x="330" y="372" font-size="24" font-weight="bold" text-anchor="end" fill="#000">−</text>
+<rect x="800" y="180" width="320" height="390" rx="14" fill="#fff" stroke="#000" stroke-width="5"/>
+<text x="815" y="215" font-size="20" font-weight="bold" text-anchor="start" fill="#000">CẢM BIẾN RUNG MPU6050</text>
+<text x="815" y="291" font-size="19" text-anchor="start" fill="#000">INT → GPIO0</text>
+<text x="815" y="381" font-size="19" text-anchor="start" fill="#000">SDA → GPIO4</text>
+<text x="815" y="471" font-size="19" text-anchor="start" fill="#000">SCL → GPIO5</text>
+<text x="815" y="521" font-size="19" text-anchor="start" fill="#000">VCC ← nhãn 3V3</text>
+<text x="815" y="561" font-size="19" text-anchor="start" fill="#000">GND ← nhãn GND</text>
+<rect x="800" y="600" width="320" height="340" rx="14" fill="#fff" stroke="#000" stroke-width="5"/>
+<text x="960" y="635" font-size="21" font-weight="bold" text-anchor="middle" fill="#000">CẦU CHIA ÁP ĐO PIN</text>
+<text x="960" y="662" font-size="17" text-anchor="middle" fill="#000">R1 = R2 = 220k, sai số 1%</text>
+<text x="960" y="706" font-size="20" font-weight="bold" text-anchor="middle" fill="#000">+ PIN</text>
+<line x1="960" y1="712" x2="960" y2="715" stroke="#000" stroke-width="4"/>
+<rect x="935" y="715" width="50" height="50" rx="0" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="1000" y="748" font-size="18" text-anchor="start" fill="#000">R1 220k</text>
+<line x1="960" y1="765" x2="960" y2="773" stroke="#000" stroke-width="4"/>
+<circle cx="960" cy="780" r="7" fill="#000"/>
+<line x1="960" y1="787" x2="960" y2="790" stroke="#000" stroke-width="4"/>
+<rect x="935" y="790" width="50" height="50" rx="0" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="1000" y="823" font-size="18" text-anchor="start" fill="#000">R2 220k</text>
+<line x1="960" y1="840" x2="960" y2="858" stroke="#000" stroke-width="4"/>
+<text x="960" y="884" font-size="20" font-weight="bold" text-anchor="middle" fill="#000">GND</text>
+<rect x="40" y="560" width="360" height="700" rx="14" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="60" y="600" font-size="22" font-weight="bold" text-anchor="start" fill="#000">GHI CHÚ QUAN TRỌNG</text>
+<text x="60" y="636" font-size="18" text-anchor="start" fill="#000">1. Không đấu ngược cực pin.</text>
+<text x="60" y="666" font-size="18" text-anchor="start" fill="#000">   Đo điện áp pin trước khi cắm.</text>
+<text x="60" y="696" font-size="18" text-anchor="start" fill="#000">2. Ba viên cùng hãng, cùng đời,</text>
+<text x="60" y="726" font-size="18" text-anchor="start" fill="#000">   sạc đều trước khi lắp.</text>
+<text x="60" y="756" font-size="18" text-anchor="start" fill="#000">3. Không có mạch bảo vệ pin.</text>
+<text x="60" y="786" font-size="18" text-anchor="start" fill="#000">   Ngắt bằng phần mềm ở 3,5V.</text>
+<text x="60" y="816" font-size="18" text-anchor="start" fill="#000">4. Tháo pin khi sạc, sạc ngoài.</text>
+<text x="60" y="846" font-size="18" text-anchor="start" fill="#000">5. Đèn báo GPIO8 có sẵn trên bo,</text>
+<text x="60" y="876" font-size="18" text-anchor="start" fill="#000">   không đấu thêm.</text>
+<text x="60" y="906" font-size="18" text-anchor="start" fill="#000">6. Hàn chắc, bọc cách điện,</text>
+<text x="60" y="936" font-size="18" text-anchor="start" fill="#000">   cố định dây tránh rung đứt.</text>
+<text x="60" y="966" font-size="18" text-anchor="start" fill="#000">7. Chưa kiểm thử trên xe thật.</text>
+<text x="40" y="1395" font-size="20" font-weight="bold" text-anchor="start" fill="#000">Chú giải:</text>
+<line x1="160" y1="1390" x2="220" y2="1390" stroke="#000" stroke-width="3"/>
+<text x="232" y="1397" font-size="18" text-anchor="start" fill="#000">tín hiệu</text>
+<line x1="380" y1="1390" x2="440" y2="1390" stroke="#000" stroke-width="7"/>
+<text x="452" y="1397" font-size="18" text-anchor="start" fill="#000">nguồn 5V / GND</text>
+<text x="700" y="1397" font-size="18" text-anchor="start" fill="#000">Nhãn cùng tên được nối với nhau</text>
+<rect x="40" y="1480" width="1110" height="150" rx="8" fill="#fff" stroke="#000" stroke-width="4"/>
+<text x="60" y="1520" font-size="21" font-weight="bold" text-anchor="start" fill="#000">Dự án: XE ĐẠP CHỐNG TRỘM (XeDap Guard)</text>
+<text x="60" y="1556" font-size="19" text-anchor="start" fill="#000">Sơ đồ: nối dây · Phiên bản v1.2 · Ngày 2026-11-02</text>
+<text x="60" y="1590" font-size="19" text-anchor="start" fill="#000">Bo: ESP32-C3 SuperMini · Cảm biến: MPU6050 · Nguồn: 3 × 18650 song song</text>
+<text x="60" y="1620" font-size="19" text-anchor="start" fill="#000">Trạng thái: bản nháp, chưa kiểm thử trên xe thật</text>
+</svg>
