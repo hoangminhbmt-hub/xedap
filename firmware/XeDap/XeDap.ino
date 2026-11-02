@@ -35,7 +35,7 @@
 #include <Update.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
-#include "driver/rtc_io.h"
+#include "driver/gpio.h"
 
 // ---------- Cấu hình (chỉnh tại đây) ----------
 constexpr int PIN_LED = 8;   // LED onboard, sáng ở mức LOW
@@ -213,9 +213,12 @@ void sleepNow() {
   Serial.flush();
   digitalWrite(PIN_LED, HIGH);
   mpuRead(0x3A);
-  rtc_gpio_pullup_dis(PIN_MPU_INT);
-  rtc_gpio_pulldown_en(PIN_MPU_INT);
-  esp_sleep_enable_ext1_wakeup(1ULL << PIN_MPU_INT, ESP_EXT1_WAKEUP_ANY_HIGH);
+  // ESP32-C3 chỉ hỗ trợ đánh thức theo GPIO (không có ext1).
+  gpio_pullup_dis(PIN_MPU_INT);
+  gpio_pulldown_en(PIN_MPU_INT);
+  gpio_hold_en(PIN_MPU_INT);
+  gpio_deep_sleep_hold_en();
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << PIN_MPU_INT, ESP_GPIO_WAKEUP_GPIO_HIGH);
   esp_deep_sleep_start();
 }
 
@@ -463,7 +466,11 @@ void setup() {
   digitalWrite(PIN_LED, HIGH);
   analogReadResolution(12);
 
-  bool byVibration = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1;
+  // Nhả giữ chân INT sau khi thức, để chân dùng bình thường
+  gpio_deep_sleep_hold_dis();
+  gpio_hold_dis(PIN_MPU_INT);
+
+  bool byVibration = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO;
 
   prefs.begin("xedap", false);
   pairPin = prefs.getUInt("pin", 0);
