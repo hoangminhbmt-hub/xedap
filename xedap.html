@@ -46,6 +46,12 @@
   #alarm.show { display: flex; animation: pulse 1s infinite; }
   #alarm h2 { font-size: 30px; margin: 0; }
   #alarm button { max-width: 320px; }
+  #alarm .mute { background: #fff; color: #b91c1c; font-size: 22px; font-weight: 800; padding: 20px; }
+  #alarm .close { background: transparent; border: 2px solid #fff; }
+  #muteBar { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 448px; margin: 0 auto;
+             width: auto; background: var(--bad); font-size: 20px; font-weight: 700; padding: 18px;
+             display: none; z-index: 9; box-shadow: 0 6px 24px rgba(0, 0, 0, .5); }
+  #muteBar.show { display: block; }
   @keyframes pulse { 50% { background: rgba(127, 29, 29, .96); } }
 </style>
 </head>
@@ -70,11 +76,11 @@
   </div>
 
   <div class="card">
-    <button id="btnFind" disabled>💡 Tìm xe (còi bíp + đèn nháy)</button>
-    <div class="grid" style="margin-top:10px">
-      <button id="btnTest" disabled>🚨 Thử còi</button>
-      <button id="btnSilence" disabled>🔇 Tắt còi</button>
+    <div class="grid">
+      <button id="btnSleep" disabled>😴 Cho xe ngủ</button>
+      <button id="btnTest">🚨 Thử còi</button>
     </div>
+    <p class="hint">Ngủ: mạch tắt Bluetooth để giữ pin hàng tháng. <b>Lắc xe khoảng 2 giây</b> để đánh thức – để trang này mở, điện thoại sẽ tự kết nối lại.</p>
   </div>
 
   <div class="card">
@@ -83,9 +89,9 @@
       <label><span>Cảnh báo sớm khi tín hiệu yếu hơn</span><b id="earlyVal"></b></label>
       <input id="early" type="range" min="-100" max="-60" step="1" style="width:100%">
       <p class="hint">Kéo sang trái: báo muộn hơn (xe phải xa hơn). Kéo sang phải: báo sớm hơn, dễ báo nhầm hơn.</p>
-      <label><span>Độ nhạy rung (số lần rung/giây để báo)</span><b id="vibThVal"></b></label>
+      <label><span>Độ nhạy rung (mức rung để báo)</span><b id="vibThVal"></b></label>
       <input id="vibTh" type="range" min="1" max="30" step="1" style="width:100%">
-      <p class="hint">Số nhỏ: nhạy hơn (dễ báo nhầm khi gió, va chạm nhẹ). Rung lần 1 chỉ rung nhẹ điện thoại; rung tiếp trong 15 giây mới hú còi. Có thể chỉnh thêm biến trở trên module.</p>
+      <p class="hint">Số nhỏ: nhạy hơn (dễ báo nhầm khi gió, va chạm nhẹ). Rung lần 1 chỉ rung nhẹ điện thoại; rung tiếp trong 15 giây mới hú còi. Xem ô "Cảm biến rung" khi lắc thử xe để chọn mức hợp lý.</p>
       <hr style="border-color:#334155">
       <label><span>Đổi mã PIN ghép đôi (6 số)</span><input id="newPin" type="number" min="100000" max="999999"></label>
       <button id="btnPin" disabled>Đổi PIN</button>
@@ -105,8 +111,12 @@
 <div id="alarm">
   <h2 id="alarmTitle">⚠️ CẢNH BÁO</h2>
   <p id="alarmMsg"></p>
-  <button class="primary" id="btnAck">Tôi đã biết</button>
+  <button class="mute" id="btnMute">🔇 TẮT ÂM THANH</button>
+  <button class="close" id="btnAck">Đóng</button>
 </div>
+
+<!-- Luôn hiện khi điện thoại đang hú -->
+<button id="muteBar">🔇 Tắt âm thanh</button>
 
 <script>
 const SVC = '6e7a1001-3c2b-4b8e-9a1f-58c5e1a0b001';
@@ -125,8 +135,9 @@ const PAIR_HINT = '⚠ Chưa ghép đôi với xe nên chưa nhận được d�
   'Máy tính Windows: vào Cài đặt → Bluetooth → Thêm thiết bị → chọn XeDap → nhập PIN, rồi bấm Kết nối lại.';
 let weakCount = 0, earlyWarned = false, lowBattWarned = false;
 let vibWarnAt = 0, vibQuietUntil = 0;
-let deviceGuard = '', guardPendingUntil = 0;  // trạng thái canh do mạch báo: 'D' / 'A' / 'X'
+let deviceGuard = '', guardPendingUntil = 0;  // trạng thái canh do mạch báo: 'D' / 'A'
 let audioCtx = null, siren = null, wakeLock = null;
+let sleeping = false;   // xe đang ngủ (do mình bấm Ngủ hoặc mạch báo 'Z')
 
 // ---------- Lưu cài đặt trên máy (không bắt buộc) ----------
 function loadSetting(key, def) {
@@ -149,9 +160,11 @@ function log(msg) {
 
 function setConnected(on) {
   $('dot').classList.toggle('on', on);
-  $('connText').textContent = on ? 'Đã kết nối' : (device ? 'Đang tìm lại xe…' : 'Chưa kết nối');
+  $('connText').textContent = on ? 'Đã kết nối'
+    : sleeping ? '😴 Xe đang ngủ – lắc xe để đánh thức'
+    : (device ? 'Đang tìm lại xe…' : 'Chưa kết nối');
   $('btnConnect').textContent = on ? 'Ngắt kết nối' : 'Kết nối với xe';
-  ['btnFind', 'btnTest', 'btnSilence', 'btnPin', 'btnUnpair'].forEach(id => $(id).disabled = !on);
+  ['btnSleep', 'btnPin', 'btnUnpair'].forEach(id => $(id).disabled = !on);
   updateGuardText();
 }
 
@@ -162,10 +175,10 @@ function updateGuardText() {
   const el = $('guardState');
   el.classList.toggle('on', on && live);
   el.classList.toggle('warn', on && !live);
-  if (!on) el.textContent = 'Đang tắt – không báo động khi mất kết nối';
-  else if (live && deviceGuard === 'X') el.textContent = '🚨 Còi trên xe đang hú!';
-  else if (live) el.textContent = 'Đang canh – còi trên xe hú khi bị rung, điện thoại báo khi xe ra xa / mất kết nối';
+  if (!on) el.textContent = sleeping ? 'Xe đang ngủ – không canh' : 'Đang tắt – không báo động khi mất kết nối';
+  else if (live) el.textContent = 'Đang canh – điện thoại báo khi xe bị rung, ra xa hoặc mất kết nối';
   else el.textContent = '⚠ Đã bật canh nhưng chưa nhận dữ liệu từ xe';
+  updateMuteBar();
 }
 
 function setSupport(text, warn) {
@@ -199,11 +212,24 @@ function startSiren() {
     up = !up;
   }, 450);
   siren = { osc, timer };
+  updateMuteBar();
 }
 function stopSiren() {
+  if (navigator.vibrate) navigator.vibrate(0);
   if (!siren) return;
   clearInterval(siren.timer); siren.osc.stop(); siren = null;
-  if (navigator.vibrate) navigator.vibrate(0);
+  updateMuteBar();
+}
+
+function updateMuteBar() {
+  $('muteBar').classList.toggle('show', !!siren);
+}
+
+// Tắt âm thanh lần này nhưng vẫn giữ chế độ canh
+function muteAll() {
+  stopSiren();
+  updateMuteBar();
+  log('🔇 Đã tắt âm thanh (vẫn canh xe nếu đang bật)');
 }
 function notify(text) {
   try { if (Notification.permission === 'granted') new Notification('XeDap Guard', { body: text }); } catch (e) {}
@@ -225,7 +251,9 @@ function softWarn(msg) {
   const o = audioCtx.createOscillator(); o.frequency.value = 1000;
   o.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + 0.2);
 }
-$('btnAck').onclick = () => { $('alarm').classList.remove('show'); stopSiren(); };
+$('btnMute').onclick = () => { muteAll(); $('alarm').classList.remove('show'); };
+$('btnAck').onclick = () => $('alarm').classList.remove('show');  // chỉ đóng, âm thanh vẫn kêu
+$('muteBar').onclick = muteAll;
 
 // ---------- Giữ màn hình sáng ----------
 async function keepAwake() {
@@ -240,6 +268,7 @@ function onStatus(text) {
   lastRx = Date.now();
   lostAlarmed = false;
   if (++rxCount === 1) {
+    if (sleeping) { sleeping = false; softWarn('Xe đã thức dậy và kết nối lại'); }
     setSupport(SUPPORT_OK, false);
     updateGuardText();
     log('Đã ghép đôi, đang nhận dữ liệu từ xe');
@@ -249,16 +278,14 @@ function onStatus(text) {
 
   // Mạch là nơi giữ trạng thái canh: ô "Canh xe" đi theo mạch (firmware cũ không gửi ô này)
   if (guardSt) {
-    const prev = deviceGuard;
     deviceGuard = guardSt;
-    if (Date.now() > guardPendingUntil) {
+    if (Date.now() > guardPendingUntil && !sleeping) {
       const want = guardSt !== 'D';
       if ($('guard').checked !== want) {
         $('guard').checked = want;
         log(want ? 'Mạch đang canh xe – đã bật Canh xe' : 'Mạch không canh – đã tắt Canh xe');
       }
     }
-    if (guardSt === 'X' && prev !== 'X') raiseAlarm('🚨 BÁO ĐỘNG', 'Còi trên xe đang hú – xe bị rung / di chuyển!');
     updateGuardText();
   }
   const p = Number(pct), r = Number(rssi);
@@ -308,6 +335,13 @@ function onStatus(text) {
     }
   }
 
+  if (flag === 'Z' && !sleeping) {
+    sleeping = true;
+    $('guard').checked = false;
+    vibWarnAt = 0; weakCount = 0; earlyWarned = false;
+    log('😴 Xe đi ngủ. Lắc xe khoảng 2 giây để đánh thức.');
+    updateGuardText();
+  }
   if (flag === 'L' && !lowBattWarned) { lowBattWarned = true; softWarn('Pin trên xe yếu, hãy sạc pin sớm'); }
   if (flag === '-' && p > 30) lowBattWarned = false;
   if (flag === 'S') {
@@ -317,7 +351,7 @@ function onStatus(text) {
 }
 
 function lostAlarm(reason) {
-  if (lostAlarmed || manualDisconnect || !$('guard').checked) return;
+  if (lostAlarmed || manualDisconnect || sleeping || !$('guard').checked) return;
   lostAlarmed = true;
   raiseAlarm('🚨 MẤT KẾT NỐI', reason + ' Xe có thể đã bị dắt đi!');
 }
@@ -392,6 +426,11 @@ function onDisconnected() {
   chCmd = null;
   setConnected(false);
   if (manualDisconnect) { log('Đã ngắt kết nối'); return; }
+  if (sleeping) {
+    log('Xe đang ngủ – trang sẽ tự kết nối lại khi xe được lắc dậy');
+    reconnectLoop();
+    return;
+  }
   log('Mất kết nối');
   lostAlarm('Mất kết nối Bluetooth với xe.');
   reconnectLoop();
@@ -400,7 +439,7 @@ function onDisconnected() {
 // Phát hiện mất tín hiệu sớm hơn sự kiện ngắt kết nối của trình duyệt
 // (chỉ khi trước đó đã nhận được dữ liệu; chưa ghép đôi thì đã có checkPaired báo)
 setInterval(() => {
-  if (device && device.gatt.connected && rxCount > 0 && Date.now() - lastRx > STALE_MS) {
+  if (device && device.gatt.connected && rxCount > 0 && !sleeping && Date.now() - lastRx > STALE_MS) {
     lostAlarm('Không nhận được tín hiệu từ xe.');
   }
 }, 1000);
@@ -426,9 +465,21 @@ $('btnConnect').onclick = async () => {
   }
 };
 
-$('btnFind').onclick = () => send('FIND').catch(e => log('Lỗi: ' + e.message));
-$('btnTest').onclick = () => send('TEST').catch(e => log('Lỗi: ' + e.message));
-$('btnSilence').onclick = () => { stopSiren(); send('SILENCE').catch(e => log('Lỗi: ' + e.message)); };
+// Thử còi trên điện thoại 3 giây (mạch không còn còi)
+$('btnTest').onclick = () => {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  if (siren) return;
+  startSiren();
+  setTimeout(stopSiren, 3000);
+};
+$('btnSleep').onclick = () => {
+  if (!confirm('Cho xe ngủ?\n\nXe sẽ KHÔNG canh trong lúc ngủ.\nMuốn đánh thức: lắc xe khoảng 2 giây.')) return;
+  sleeping = true;
+  $('guard').checked = false;
+  vibWarnAt = 0; weakCount = 0; earlyWarned = false;
+  updateGuardText();
+  send('SLEEP').catch(e => { sleeping = false; log('Lỗi: ' + e.message); });
+};
 $('btnPin').onclick = () => {
   const p = $('newPin').value;
   if (!/^[1-9]\d{5}$/.test(p)) return log('PIN phải gồm 6 chữ số, không bắt đầu bằng 0');
