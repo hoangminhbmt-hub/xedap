@@ -93,6 +93,12 @@
       <input id="vibTh" type="range" min="1" max="30" step="1" style="width:100%">
       <p class="hint">Số nhỏ: nhạy hơn (dễ báo nhầm khi gió, va chạm nhẹ). Rung lần 1 chỉ rung nhẹ điện thoại; rung tiếp trong 15 giây mới hú còi. Xem ô "Cảm biến rung" khi lắc thử xe để chọn mức hợp lý.</p>
       <hr style="border-color:#334155">
+      <label><span>📍 Bỏ qua rung khi tôi ở gần xe</span><input id="zoneOn" type="checkbox" style="width:22px;height:22px"></label>
+      <label><span>Chỉ báo rung khi tín hiệu yếu hơn</span><b id="zoneVal"></b></label>
+      <input id="zone" type="range" min="-95" max="-50" step="1" style="width:100%">
+      <button id="btnZone" disabled>📍 Lấy vị trí hiện tại làm ranh giới</button>
+      <p class="hint">Dùng khi đạp xe mà vẫn bật canh: bạn ở gần thì rung chỉ ghi vào nhật ký, không báo. Cách chỉnh: đứng cách xe đúng khoảng muốn (vd 5 m), cầm điện thoại như lúc bình thường, chờ 5 giây rồi bấm nút trên. Khoảng cách chỉ là ước lượng – túi quần, người chắn có thể làm sai vài mét. "Xe đang ra xa" và "Mất kết nối" vẫn luôn báo.</p>
+      <hr style="border-color:#334155">
       <label><span>Đổi mã PIN ghép đôi (6 số)</span><input id="newPin" type="number" min="100000" max="999999"></label>
       <button id="btnPin" disabled>Đổi PIN</button>
       <p></p>
@@ -138,6 +144,8 @@ let vibWarnAt = 0, vibQuietUntil = 0;
 let deviceGuard = '', guardPendingUntil = 0;  // trạng thái canh do mạch báo: 'D' / 'A'
 let audioCtx = null, siren = null, wakeLock = null;
 let sleeping = false;   // xe đang ngủ (do mình bấm Ngủ hoặc mạch báo 'Z')
+const RSSI_AVG_N = 5;   // lấy trung bình 5 lần đo (5 giây) vì tín hiệu dao động mạnh
+let rssiHist = [], zoneLogAt = 0;
 
 // ---------- Lưu cài đặt trên máy (không bắt buộc) ----------
 function loadSetting(key, def) {
@@ -153,6 +161,38 @@ $('vibThVal').textContent = $('vibTh').value;
 $('vibTh').oninput = () => { $('vibThVal').textContent = $('vibTh').value; saveSetting('vibTh', $('vibTh').value); };
 $('vibTh').onchange = () => { if (chCmd) send('VIB:' + $('vibTh').value).catch(e => log('Lỗi: ' + e.message)); };
 
+// ---------- Vùng an toàn: bỏ qua rung khi chủ xe ở gần ----------
+// Ước lượng rất thô, phụ thuộc điện thoại, túi quần, người chắn
+function distText(r) {
+  return r > -60 ? '~1–2 m' : r > -65 ? '~2–3 m' : r > -70 ? '~3–5 m' : r > -75 ? '~5–8 m'
+       : r > -80 ? '~8–12 m' : r > -85 ? '~12–15 m' : '> 15 m';
+}
+function showZone() { $('zoneVal').textContent = `${$('zone').value} dBm (${distText(Number($('zone').value))})`; }
+$('zoneOn').checked = loadSetting('zoneOn', '1') === '1';
+$('zone').value = loadSetting('zone', '-72');
+showZone();
+$('zone').oninput = () => { showZone(); saveSetting('zone', $('zone').value); };
+$('zoneOn').onchange = () => {
+  saveSetting('zoneOn', $('zoneOn').checked ? '1' : '0');
+  log($('zoneOn').checked ? '📍 Bật vùng an toàn: ở gần xe thì không báo rung' : '📍 Tắt vùng an toàn: rung luôn báo');
+  updateGuardText();
+};
+function rssiAvg() {
+  return rssiHist.length ? rssiHist.reduce((a, b) => a + b, 0) / rssiHist.length : 0;
+}
+// true = chủ xe đang ở gần (chưa đo được tín hiệu thì coi là xa, để không bỏ sót báo động)
+function ownerNear() {
+  return $('zoneOn').checked && rssiHist.length > 0 && rssiAvg() > Number($('zone').value);
+}
+$('btnZone').onclick = () => {
+  if (rssiHist.length < 3) return log('Chưa đủ dữ liệu tín hiệu – chờ vài giây rồi bấm lại');
+  const v = Math.max(-95, Math.min(-50, Math.round(rssiAvg())));
+  $('zone').value = v; saveSetting('zone', v); showZone();
+  if (!$('zoneOn').checked) { $('zoneOn').checked = true; saveSetting('zoneOn', '1'); }
+  log(`📍 Đã đặt ranh giới vùng an toàn: ${v} dBm (${distText(v)}). Xa hơn chỗ này thì rung mới báo.`);
+  updateGuardText();
+};
+
 function log(msg) {
   const t = new Date().toLocaleTimeString('vi-VN');
   $('log').textContent = `${t}  ${msg}\n` + $('log').textContent;
@@ -164,7 +204,8 @@ function setConnected(on) {
     : sleeping ? '😴 Xe đang ngủ – lắc xe để đánh thức'
     : (device ? 'Đang tìm lại xe…' : 'Chưa kết nối');
   $('btnConnect').textContent = on ? 'Ngắt kết nối' : 'Kết nối với xe';
-  ['btnSleep', 'btnPin', 'btnUnpair'].forEach(id => $(id).disabled = !on);
+  ['btnSleep', 'btnPin', 'btnUnpair', 'btnZone'].forEach(id => $(id).disabled = !on);
+  if (!on) rssiHist = [];
   updateGuardText();
 }
 
@@ -176,7 +217,9 @@ function updateGuardText() {
   el.classList.toggle('on', on && live);
   el.classList.toggle('warn', on && !live);
   if (!on) el.textContent = sleeping ? 'Xe đang ngủ – không canh' : 'Đang tắt – không báo động khi mất kết nối';
-  else if (live) el.textContent = 'Đang canh – điện thoại báo khi xe bị rung, ra xa hoặc mất kết nối';
+  else if (live) el.textContent = $('zoneOn').checked
+    ? `Đang canh – báo khi xe bị rung lúc bạn ở xa (${distText(Number($('zone').value))}), ra xa hoặc mất kết nối`
+    : 'Đang canh – điện thoại báo khi xe bị rung, ra xa hoặc mất kết nối';
   else el.textContent = '⚠ Đã bật canh nhưng chưa nhận dữ liệu từ xe';
   updateMuteBar();
 }
@@ -299,7 +342,9 @@ function onStatus(text) {
   }
 
   if (r) {
-    $('mRssi').textContent = r + ' dBm';
+    rssiHist.push(r);
+    if (rssiHist.length > RSSI_AVG_N) rssiHist.shift();
+    $('mRssi').textContent = `${r} dBm · ${distText(Math.round(rssiAvg()))}`;
     $('mDist').textContent = r > -60 ? 'Rất gần' : r > -75 ? 'Gần' : r > -88 ? 'Xa' : 'Rất xa';
     $('rssiBar').style.width = Math.max(0, Math.min(100, (r + 100) * 2)) + '%';
     $('rssiBar').style.background = r <= Number($('early').value) ? 'var(--warn)' : 'var(--accent)';
@@ -322,7 +367,13 @@ function onStatus(text) {
     $('mVib').textContent = v >= vth ? `Đang rung (${v})` : v > 0 ? `Rung nhẹ (${v})` : 'Yên';
     $('vibBar').style.width = Math.min(100, v * 50 / vth) + '%';
     $('vibBar').style.background = v >= vth ? 'var(--bad)' : 'var(--accent)';
-    if ($('guard').checked && v >= vth && now > vibQuietUntil) {
+    if ($('guard').checked && v >= vth && ownerNear()) {
+      vibWarnAt = 0;  // đang ở gần: không tính rung này, ra xa phải rung lại 2 lần mới hú còi
+      if (now - zoneLogAt > 10000) {
+        zoneLogAt = now;
+        log(`Rung mức ${v} khi bạn ở gần xe (${Math.round(rssiAvg())} dBm) – bỏ qua`);
+      }
+    } else if ($('guard').checked && v >= vth && now > vibQuietUntil) {
       if (vibWarnAt && now - vibWarnAt < VIB_WINDOW_MS) {
         vibWarnAt = 0;
         vibQuietUntil = now + 30000;  // không hú lặp lại mỗi giây
