@@ -66,10 +66,15 @@
   <div class="card grid">
     <div class="metric"><span>Pin trên xe</span><b id="mBatt">–</b><div class="bar"><i id="battBar"></i></div></div>
     <div class="metric"><span>Khoảng cách</span><b id="mDist">–</b><div class="bar"><i id="rssiBar"></i></div><span id="mRssi"></span></div>
+    <div class="metric" style="grid-column: span 2"><span>Cảm biến rung</span><b id="mVib">–</b><div class="bar"><i id="vibBar"></i></div></div>
   </div>
 
   <div class="card">
-    <button id="btnFind" disabled>💡 Tìm xe (đèn trên mạch nháy 10 giây)</button>
+    <button id="btnFind" disabled>💡 Tìm xe (còi bíp + đèn nháy)</button>
+    <div class="grid" style="margin-top:10px">
+      <button id="btnTest" disabled>🚨 Thử còi</button>
+      <button id="btnSilence" disabled>🔇 Tắt còi</button>
+    </div>
   </div>
 
   <div class="card">
@@ -78,6 +83,9 @@
       <label><span>Cảnh báo sớm khi tín hiệu yếu hơn</span><b id="earlyVal"></b></label>
       <input id="early" type="range" min="-100" max="-60" step="1" style="width:100%">
       <p class="hint">Kéo sang trái: báo muộn hơn (xe phải xa hơn). Kéo sang phải: báo sớm hơn, dễ báo nhầm hơn.</p>
+      <label><span>Độ nhạy rung (số lần rung/giây để báo)</span><b id="vibThVal"></b></label>
+      <input id="vibTh" type="range" min="1" max="30" step="1" style="width:100%">
+      <p class="hint">Số nhỏ: nhạy hơn (dễ báo nhầm khi gió, va chạm nhẹ). Rung lần 1 chỉ rung nhẹ điện thoại; rung tiếp trong 15 giây mới hú còi. Có thể chỉnh thêm biến trở trên module.</p>
       <hr style="border-color:#334155">
       <label><span>Đổi mã PIN ghép đôi (6 số)</span><input id="newPin" type="number" min="100000" max="999999"></label>
       <button id="btnPin" disabled>Đổi PIN</button>
@@ -106,6 +114,7 @@ const ST  = '6e7a1002-3c2b-4b8e-9a1f-58c5e1a0b001';
 const CMD = '6e7a1003-3c2b-4b8e-9a1f-58c5e1a0b001';
 const STALE_MS = 6000;      // không nhận dữ liệu quá 6 giây = mất tín hiệu
 const EARLY_COUNT = 3;      // tín hiệu yếu liên tục 3 giây mới cảnh báo sớm
+const VIB_WINDOW_MS = 15000; // rung lần 2 trong 15 giây sau lần 1 -> hú còi
 
 const $ = id => document.getElementById(id);
 let device = null, chCmd = null;
@@ -115,6 +124,8 @@ const PAIR_HINT = '⚠ Chưa ghép đôi với xe nên chưa nhận được d�
   'Điện thoại: nhập mã PIN khi được hỏi. ' +
   'Máy tính Windows: vào Cài đặt → Bluetooth → Thêm thiết bị → chọn XeDap → nhập PIN, rồi bấm Kết nối lại.';
 let weakCount = 0, earlyWarned = false, lowBattWarned = false;
+let vibWarnAt = 0, vibQuietUntil = 0;
+let deviceGuard = '', guardPendingUntil = 0;  // trạng thái canh do mạch báo: 'D' / 'A' / 'X'
 let audioCtx = null, siren = null, wakeLock = null;
 
 // ---------- Lưu cài đặt trên máy (không bắt buộc) ----------
@@ -126,6 +137,10 @@ function saveSetting(key, v) { try { localStorage.setItem(key, v); } catch (e) {
 $('early').value = loadSetting('early', '-85');
 $('earlyVal').textContent = $('early').value + ' dBm';
 $('early').oninput = () => { $('earlyVal').textContent = $('early').value + ' dBm'; saveSetting('early', $('early').value); };
+$('vibTh').value = loadSetting('vibTh', '5');
+$('vibThVal').textContent = $('vibTh').value;
+$('vibTh').oninput = () => { $('vibThVal').textContent = $('vibTh').value; saveSetting('vibTh', $('vibTh').value); };
+$('vibTh').onchange = () => { if (chCmd) send('VIB:' + $('vibTh').value).catch(e => log('Lỗi: ' + e.message)); };
 
 function log(msg) {
   const t = new Date().toLocaleTimeString('vi-VN');
@@ -136,7 +151,7 @@ function setConnected(on) {
   $('dot').classList.toggle('on', on);
   $('connText').textContent = on ? 'Đã kết nối' : (device ? 'Đang tìm lại xe…' : 'Chưa kết nối');
   $('btnConnect').textContent = on ? 'Ngắt kết nối' : 'Kết nối với xe';
-  ['btnFind', 'btnPin', 'btnUnpair'].forEach(id => $(id).disabled = !on);
+  ['btnFind', 'btnTest', 'btnSilence', 'btnPin', 'btnUnpair'].forEach(id => $(id).disabled = !on);
   updateGuardText();
 }
 
@@ -148,7 +163,8 @@ function updateGuardText() {
   el.classList.toggle('on', on && live);
   el.classList.toggle('warn', on && !live);
   if (!on) el.textContent = 'Đang tắt – không báo động khi mất kết nối';
-  else if (live) el.textContent = 'Đang canh – sẽ báo động khi xe ra xa / mất kết nối';
+  else if (live && deviceGuard === 'X') el.textContent = '🚨 Còi trên xe đang hú!';
+  else if (live) el.textContent = 'Đang canh – còi trên xe hú khi bị rung, điện thoại báo khi xe ra xa / mất kết nối';
   else el.textContent = '⚠ Đã bật canh nhưng chưa nhận dữ liệu từ xe';
 }
 
@@ -161,7 +177,12 @@ $('guard').onchange = () => {
   const on = $('guard').checked;
   updateGuardText();
   weakCount = 0; earlyWarned = false; lostAlarmed = false;
+  vibWarnAt = 0; vibQuietUntil = 0;
   log(on ? 'Bật canh xe' : 'Tắt canh xe');
+  if (chCmd && rxCount > 0) {
+    guardPendingUntil = Date.now() + 3000;  // chờ mạch xác nhận, tránh bị gói cũ ghi đè
+    send(on ? 'ARM' : 'DISARM').catch(e => log('Lỗi: ' + e.message));
+  }
   if (on && !(device && device.gatt.connected)) raiseAlarm('📡 CHƯA KẾT NỐI', 'Bạn đang bật canh xe nhưng chưa kết nối với xe.');
 };
 
@@ -222,8 +243,24 @@ function onStatus(text) {
     setSupport(SUPPORT_OK, false);
     updateGuardText();
     log('Đã ghép đôi, đang nhận dữ liệu từ xe');
+    send('VIB:' + $('vibTh').value).catch(() => {});  // mạch dùng cùng ngưỡng rung với trang
   }
-  const [pct, mv, rssi, flag] = text.split(',');
+  const [pct, mv, rssi, flag, vib, guardSt] = text.split(',');
+
+  // Mạch là nơi giữ trạng thái canh: ô "Canh xe" đi theo mạch (firmware cũ không gửi ô này)
+  if (guardSt) {
+    const prev = deviceGuard;
+    deviceGuard = guardSt;
+    if (Date.now() > guardPendingUntil) {
+      const want = guardSt !== 'D';
+      if ($('guard').checked !== want) {
+        $('guard').checked = want;
+        log(want ? 'Mạch đang canh xe – đã bật Canh xe' : 'Mạch không canh – đã tắt Canh xe');
+      }
+    }
+    if (guardSt === 'X' && prev !== 'X') raiseAlarm('🚨 BÁO ĐỘNG', 'Còi trên xe đang hú – xe bị rung / di chuyển!');
+    updateGuardText();
+  }
   const p = Number(pct), r = Number(rssi);
 
   if (p >= 0) {
@@ -250,6 +287,25 @@ function onStatus(text) {
   } else {
     weakCount = 0;
     if (r > Number($('early').value) + 5) earlyWarned = false;
+  }
+
+  // Cảm biến rung (firmware cũ không gửi ô này -> vib undefined)
+  if (vib !== undefined) {
+    const v = Number(vib) || 0, vth = Number($('vibTh').value), now = Date.now();
+    $('mVib').textContent = v >= vth ? `Đang rung (${v})` : v > 0 ? `Rung nhẹ (${v})` : 'Yên';
+    $('vibBar').style.width = Math.min(100, v * 50 / vth) + '%';
+    $('vibBar').style.background = v >= vth ? 'var(--bad)' : 'var(--accent)';
+    if ($('guard').checked && v >= vth && now > vibQuietUntil) {
+      if (vibWarnAt && now - vibWarnAt < VIB_WINDOW_MS) {
+        vibWarnAt = 0;
+        vibQuietUntil = now + 30000;  // không hú lặp lại mỗi giây
+        raiseAlarm('🚨 BÁO ĐỘNG', `Xe đang bị di chuyển / rung mạnh (mức ${v})!`);
+      } else {
+        vibWarnAt = now;
+        vibQuietUntil = now + 3000;   // lần rung sau ít nhất 3 giây mới tính là lần 2
+        softWarn(`Xe bị rung (mức ${v})`);
+      }
+    }
   }
 
   if (flag === 'L' && !lowBattWarned) { lowBattWarned = true; softWarn('Pin trên xe yếu, hãy sạc pin sớm'); }
@@ -371,6 +427,8 @@ $('btnConnect').onclick = async () => {
 };
 
 $('btnFind').onclick = () => send('FIND').catch(e => log('Lỗi: ' + e.message));
+$('btnTest').onclick = () => send('TEST').catch(e => log('Lỗi: ' + e.message));
+$('btnSilence').onclick = () => { stopSiren(); send('SILENCE').catch(e => log('Lỗi: ' + e.message)); };
 $('btnPin').onclick = () => {
   const p = $('newPin').value;
   if (!/^[1-9]\d{5}$/.test(p)) return log('PIN phải gồm 6 chữ số, không bắt đầu bằng 0');
