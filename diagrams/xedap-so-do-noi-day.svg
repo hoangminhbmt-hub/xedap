@@ -18,7 +18,7 @@
   </style>
   <rect width="1010" height="1260" fill="#fff"/>
 
-  <text x="505" y="52" font-size="34" font-weight="bold" text-anchor="middle">XE ĐẠP ESP32-C3 · SƠ ĐỒ NỐI DÂY v2.3</text>
+  <text x="505" y="52" font-size="34" font-weight="bold" text-anchor="middle">XE ĐẠP ESP32-C3 · SƠ ĐỒ NỐI DÂY v3.2</text>
   <text x="505" y="78" font-size="16" text-anchor="middle">Mọi dây ở MỘT hàng chân (bên trái) · không đèn · không còi</text>
 
   <!-- Board -->
