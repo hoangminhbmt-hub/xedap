@@ -7,6 +7,7 @@ Mạch **không có đèn, không có còi** (để trong hộp kín chống nư
 firmware/XeDap/XeDap.ino   Firmware (nạp bản này)
 xedap.html                 Trang web điện thoại (GitHub Pages)
 manifest.json, icon-*.png  Để cài trang web như ứng dụng trên điện thoại
+diagrams/xedap-so-do-noi-day.svg (.png)  Sơ đồ nối dây
 ```
 
 ## Phần cứng
@@ -20,6 +21,8 @@ manifest.json, icon-*.png  Để cài trang web như ứng dụng trên điện 
 | Hộp nhựa kín | Không dùng hộp kim loại (chặn Bluetooth). Gắn chặt hộp vào khung xe |
 
 ## Nối dây – mọi dây ở hàng chân trái (5V GND 3V3 IO4 IO3 IO2 IO1 IO0)
+
+![Sơ đồ nối dây](diagrams/xedap-so-do-noi-day.svg)
 
 Nhìn mặt có linh kiện, cổng USB hướng lên. **Hàng chân phải không hàn gì.**
 
