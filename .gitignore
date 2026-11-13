@@ -1,0 +1,14 @@
+# Arduino / ESP32 build
+build/
+*.elf
+*.map
+
+# Thong tin nhay cam
+secrets.h
+.env
+
+# Windows
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak

@@ -5,6 +5,7 @@ Mạch **không có đèn, không có còi** (để trong hộp kín chống nư
 
 ```
 firmware/XeDap/XeDap.ino   Firmware (nạp bản này)
+firmware/XeGuard/XeGuard.ino  Bản cũ XeGuard v1.0, chỉ để tham khảo (không nạp)
 xedap.html                 Trang web điện thoại (GitHub Pages)
 manifest.json, icon-*.png  Để cài trang web như ứng dụng trên điện thoại
 diagrams/xedap-so-do-noi-day.svg (.png)  Sơ đồ nối dây
