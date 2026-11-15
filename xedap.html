@@ -145,6 +145,7 @@ let deviceGuard = '', guardPendingUntil = 0;  // trạng thái canh do mạch b�
 let audioCtx = null, siren = null, wakeLock = null;
 let sleeping = false;   // xe đang ngủ (do mình bấm Ngủ hoặc mạch báo 'Z')
 let noSensorWarned = false;  // đã báo "không thấy cảm biến rung" (cờ 'N')
+let lostWhileGuard = false;  // mất kết nối lúc đang canh: mạch có thể đã tự ngủ và tắt canh
 const NO_SENSOR_MSG = '⚠ Xe KHÔNG ngủ được: mạch không thấy cảm biến rung MPU-6050. ' +
   'Kiểm tra dây VCC→3V3, GND, SCL→IO4, SDA→IO3 và mối hàn. Mạch đang thức nên sẽ hao pin.';
 const RSSI_AVG_N = 5;   // lấy trung bình 5 lần đo (5 giây) vì tín hiệu dao động mạnh
@@ -329,9 +330,12 @@ function onStatus(text) {
       const want = guardSt !== 'D';
       if ($('guard').checked !== want) {
         $('guard').checked = want;
-        log(want ? 'Mạch đang canh xe – đã bật Canh xe' : 'Mạch không canh – đã tắt Canh xe');
+        // Mạch v3.3: đang canh mà mất kết nối quá 10 phút thì tự ngủ và tắt canh
+        if (!want && lostWhileGuard) softWarn('Xe đã tự ngủ lúc mất kết nối nên đã tắt canh – bật lại Canh xe nếu cần');
+        else log(want ? 'Mạch đang canh xe – đã bật Canh xe' : 'Mạch không canh – đã tắt Canh xe');
       }
     }
+    lostWhileGuard = false;
     updateGuardText();
   }
   const p = Number(pct), r = Number(rssi);
@@ -497,6 +501,7 @@ function onDisconnected() {
     return;
   }
   log('Mất kết nối');
+  if ($('guard').checked) lostWhileGuard = true;
   lostAlarm('Mất kết nối Bluetooth với xe.');
   reconnectLoop();
 }
