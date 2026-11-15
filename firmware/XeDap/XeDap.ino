@@ -1,5 +1,5 @@
 /*
- * XeDap Guard v3.2 - Báo mất xe đạp qua Bluetooth LE (ESP32-C3) - bản tiết kiệm pin
+ * XeDap Guard v3.3 - Báo mất xe đạp qua Bluetooth LE (ESP32-C3) - bản tiết kiệm pin
  *
  * Phần cứng (mọi dây nằm ở MỘT hàng chân của ESP32-C3 SuperMini: 5V GND 3V3 4 3 2 1 0)
  *   4 viên pin sạc NiMH 1.2V : (+) → 5V, (−) → GND
@@ -13,6 +13,8 @@
  *
  * Ngủ (Bluetooth tắt hẳn):
  *   - Lệnh SLEEP từ app, hoặc tự ngủ sau 3 phút không ai kết nối và không canh.
+ *   - Đang canh mà mất kết nối quá 10 phút cũng tự ngủ (tắt canh), tránh thức mãi hết pin.
+ *     Còn điện thoại kết nối thì không bao giờ tự ngủ.
  *   - Xe đứng yên lúc đi ngủ -> lắc xe ~2 giây để đánh thức.
  *   - Xe đang rung lúc đi ngủ, hoặc vừa bị lắc dậy mà không ai kết nối (đang đạp xe)
  *     -> KHÔNG nhận lắc; cứ 20 giây tự dậy ~0.5 giây kiểm tra (không bật Bluetooth),
@@ -49,6 +51,7 @@ constexpr uint16_t VBAT_LOW_MV = 4600;    // 1.15V/viên (~20%) -> báo pin yế
 constexpr uint16_t VBAT_EMPTY_MV = 4200;  // 1.05V/viên -> ngủ hẳn, tránh xả hỏng pin NiMH
 
 constexpr uint32_t IDLE_SLEEP_MS = 3UL * 60 * 1000;  // không kết nối & không canh -> tự ngủ
+constexpr uint32_t ARMED_LOST_SLEEP_MS = 10UL * 60 * 1000;  // đang canh mà mất kết nối -> vẫn ngủ
 constexpr uint32_t LOCK_CHECK_MS = 20UL * 1000;      // ngủ khoá lắc: 20 giây dậy kiểm tra 1 lần
 constexpr uint32_t MOVE_RECENT_MS = 10000;           // rung trong 10 giây cuối = xe đang di chuyển
 constexpr uint8_t MOVE_LEVEL = 5;                    // mức rung coi là "đang di chuyển" (50 mg)
@@ -451,15 +454,19 @@ void handleCommand(char* c) {
 // =====================================================================
 //  Tác vụ 1 giây/lần
 // =====================================================================
+// Thời gian không kết nối tối đa trước khi tự ngủ (đang canh thì chờ lâu hơn)
+uint32_t idleLimitMs() { return armed ? ARMED_LOST_SLEEP_MS : IDLE_SLEEP_MS; }
+
 void printStatusLine(uint32_t now, bool connected) {
-  long left = (long)(IDLE_SLEEP_MS - (now - idleSince)) / 1000;
+  long left = ((long)idleLimitMs() - (long)(now - idleSince)) / 1000;
   Serial.printf("[TT] Pin %u mV (%d%%) | cam bien: %s (0x%02X, WHO=0x%02X%s) | canh: %s | "
                 "ket noi: %s | rung: %u",
                 vbatMv, batteryPercent(vbatMv), mpuName(), mpuAddr, mpuWho,
                 i2cSwapped ? ", SDA/SCL bi dao" : "", armed ? "BAT" : "tat",
                 connected ? (bleAuthed ? "co" : "chua ghep doi") : "khong", vibLevel);
   if (!mpuOk) Serial.print(" | KHONG NGU DUOC: kiem tra day MPU");
-  else if (connected || armed) Serial.print(" | khong tu ngu");
+  else if (connected) Serial.print(" | khong tu ngu");
+  else if (armed) Serial.printf(" | dang canh, mat ket noi -> tu ngu sau %ld s", max(left, 0L));
   else Serial.printf(" | tu ngu sau %ld s", max(left, 0L));
   Serial.println();
 }
@@ -518,11 +525,14 @@ void slowTasks() {
     printStatusLine(now, connected);
   }
 
-  // Tự ngủ: không ai kết nối và không canh
-  if (connected || armed) idleSince = now;
-  if (mpuOk && now - idleSince > IDLE_SLEEP_MS) {
+  // Tự ngủ: tính từ lần cuối có kết nối. Không canh: 3 phút. Đang canh: 10 phút
+  // (đủ để điện thoại kết nối lại khi chủ quay về, nhưng không thức mãi hết pin)
+  if (connected) idleSince = now;
+  if (mpuOk && now - idleSince > idleLimitMs()) {
+    // Đang canh: xe vừa rung (bị dắt đi?) thì khoá lắc, đứng yên thì lắc là dậy
+    if (armed) goSleepAuto("dang canh nhung mat ket noi qua 10 phut");
     // Vừa bị lắc dậy mà không ai dùng -> nhiều khả năng đang đạp xe -> khoá lắc
-    if (wokeByShake && !everConnected) goSleep("lac day nhung khong ai ket noi", true);
+    else if (wokeByShake && !everConnected) goSleep("lac day nhung khong ai ket noi", true);
     else goSleepAuto("khong ai ket noi");
   }
 
@@ -575,7 +585,7 @@ void setup() {
   setupBle();
   idleSince = millis();
 
-  Serial.printf("XeDap v3.2 san sang%s. Pin %u mV (%d%%), cam bien: %s, PIN ghep doi: %06lu\n",
+  Serial.printf("XeDap v3.3 san sang%s. Pin %u mV (%d%%), cam bien: %s, PIN ghep doi: %06lu\n",
                 wokeByShake ? " (vua lac day)" : "", vbatMv, batteryPercent(vbatMv), mpuName(),
                 (unsigned long)pairPin);
   if (mpuOk) {

@@ -1,4 +1,4 @@
-# XeDap Guard v3.2 – Báo mất xe đạp qua Bluetooth (ESP32-C3), bản tiết kiệm pin
+# XeDap Guard v3.3 – Báo mất xe đạp qua Bluetooth (ESP32-C3), bản tiết kiệm pin
 
 ESP32-C3 gắn trên xe đạp phát Bluetooth. Điện thoại kết nối và **báo động khi xe bị rung, ra xa hoặc mất kết nối**.
 Mạch **không có đèn, không có còi** (để trong hộp kín chống nước). Khi không dùng thì mạch **ngủ**; **lắc xe** để đánh thức.
@@ -8,7 +8,7 @@ firmware/XeDap/XeDap.ino   Firmware (nạp bản này)
 firmware/XeGuard/XeGuard.ino  Bản cũ XeGuard v1.0, chỉ để tham khảo (không nạp)
 xedap.html                 Trang web điện thoại (GitHub Pages)
 manifest.json, icon-*.png  Để cài trang web như ứng dụng trên điện thoại
-diagrams/xedap-so-do-noi-day.svg (.png)  Sơ đồ nối dây
+diagrams/xedap-so-do-noi-day.svg (.png)  Sơ đồ nối dây (bản v3.2, dùng chung cho v3.3: dây không đổi)
 ```
 
 ## Phần cứng
@@ -57,7 +57,7 @@ Pin (−) ──────┴────────────── GND
 1. Arduino IDE → Boards Manager → **esp32 by Espressif** (≥ 3.0). Library Manager → **NimBLE-Arduino** (≥ 2.1). Không cần thư viện MPU.
 2. Board: *ESP32C3 Dev Module*, **USB CDC On Boot: Enabled**. Cổng: chọn cổng của ESP32 (không chọn cổng Bluetooth ảo).
 3. Mở `XeDap.ino`, **đổi `DEFAULT_PIN = 123456`** thành mã của bạn, rồi nạp.
-4. Serial Monitor 115200 (mạch chờ 2 giây cho Serial Monitor kết nối) in: `XeDap v3.2 san sang. ... cam bien: MPU-6050 ...`, rồi cứ 5 giây một dòng `[TT]` (pin, cảm biến, canh, kết nối, còn bao lâu tự ngủ).
+4. Serial Monitor 115200 (mạch chờ 2 giây cho Serial Monitor kết nối) in: `XeDap v3.3 san sang. ... cam bien: MPU-6050 ...`, rồi cứ 5 giây một dòng `[TT]` (pin, cảm biến, canh, kết nối, còn bao lâu tự ngủ).
    - `KHONG THAY`: mạch không thấy cảm biến → **không ngủ được, hao pin**. Kiểm tra VCC→3V3, GND, SCL→IO4, SDA→IO3, mối hàn.
      Mạch tự dò lại mỗi 5 giây: dây tiếp xúc lại thì in `Da tim lai cam bien`, không cần rút điện.
    - `Mat ket noi cam bien rung (long day?)`: đang chạy thì cảm biến tuột → dây lỏng. **Hàn chết 4 dây**, đừng dùng dây cắm trên xe đạp.
@@ -86,7 +86,8 @@ Trang web chạy từ các file `xedap.html`, `manifest.json`, `icon-192.png`, `
 | Không ai kết nối, không canh | Tự ngủ sau 3 phút |
 | Đi ngủ lúc xe đang rung, hoặc bị lắc dậy mà không ai kết nối (đang đạp xe) | **Không nhận lắc**: cứ 20 giây dậy ~0.5 giây kiểm tra, xe đứng yên mới bật lại lắc để đánh thức. Dựng xe xong chờ tối đa ~20 giây là lắc dậy được |
 | Bấm Ngủ nhưng mạch không thấy cảm biến | Mạch không ngủ, app hiện cảnh báo vàng ở đầu trang |
-| Đang canh | Không bao giờ tự ngủ |
+| Đang canh, điện thoại còn kết nối | Không tự ngủ |
+| Đang canh nhưng mất kết nối quá 10 phút (ra ngoài tầm, tắt trang, mạch khởi động lại) | Tự ngủ và **tắt canh** để khỏi hết pin. 10 phút đầu vẫn chờ điện thoại kết nối lại. Lắc xe để dậy, rồi bật lại Canh xe |
 | Pin ≤ 20% | Báo "Pin yếu" |
 | Pin < 4.2V | Báo "Pin cạn", ngủ hẳn (lắc không dậy) – sạc pin rồi lắp lại |
 
