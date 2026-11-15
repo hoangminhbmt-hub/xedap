@@ -41,6 +41,10 @@
   .bar { height: 8px; border-radius: 4px; background: #0b1222; overflow: hidden; margin-top: 6px; }
   .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
   .hint { color: var(--muted); font-size: 13px; }
+  /* Mất kết nối / xe ngủ: số liệu là giá trị cũ, làm mờ đi */
+  .grid.stale .metric b, .grid.stale .metric .bar, .grid.stale #mRssi { opacity: .35; }
+  #staleNote { grid-column: span 2; margin: 0; display: none; }
+  .grid.stale #staleNote { display: block; }
   #alarm { position: fixed; inset: 0; background: rgba(185, 28, 28, .96); display: none; flex-direction: column;
            align-items: center; justify-content: center; gap: 20px; padding: 24px; text-align: center; z-index: 10; }
   #alarm.show { display: flex; animation: pulse 1s infinite; }
@@ -69,7 +73,8 @@
     <div id="guardState">Đang tắt – không báo động khi mất kết nối</div>
   </div>
 
-  <div class="card grid">
+  <div class="card grid" id="metrics">
+    <p class="hint" id="staleNote"></p>
     <div class="metric"><span>Pin trên xe</span><b id="mBatt">–</b><div class="bar"><i id="battBar"></i></div></div>
     <div class="metric"><span>Khoảng cách</span><b id="mDist">–</b><div class="bar"><i id="rssiBar"></i></div><span id="mRssi"></span></div>
     <div class="metric" style="grid-column: span 2"><span>Cảm biến rung</span><b id="mVib">–</b><div class="bar"><i id="vibBar"></i></div></div>
@@ -146,6 +151,7 @@ let audioCtx = null, siren = null, wakeLock = null;
 let sleeping = false;   // xe đang ngủ (do mình bấm Ngủ hoặc mạch báo 'Z')
 let noSensorWarned = false;  // đã báo "không thấy cảm biến rung" (cờ 'N')
 let lostWhileGuard = false;  // mất kết nối lúc đang canh: mạch có thể đã tự ngủ và tắt canh
+let lastDataAt = 0;          // lúc nhận gói dữ liệu gần nhất (để ghi "số liệu lần cuối")
 const NO_SENSOR_MSG = '⚠ Xe KHÔNG ngủ được: mạch không thấy cảm biến rung MPU-6050. ' +
   'Kiểm tra dây VCC→3V3, GND, SCL→IO4, SDA→IO3 và mối hàn. Mạch đang thức nên sẽ hao pin.';
 const RSSI_AVG_N = 5;   // lấy trung bình 5 lần đo (5 giây) vì tín hiệu dao động mạnh
@@ -211,6 +217,18 @@ function setConnected(on) {
   ['btnSleep', 'btnPin', 'btnUnpair', 'btnZone'].forEach(id => $(id).disabled = !on);
   if (!on) rssiHist = [];
   updateGuardText();
+  updateStale();
+}
+
+// Không còn nhận dữ liệu (mất kết nối, xe ngủ): làm mờ ô số liệu, ghi giờ lần cuối
+function updateStale() {
+  const live = !!(device && device.gatt.connected && rxCount > 0 && Date.now() - lastRx < STALE_MS);
+  const stale = !live && lastDataAt > 0;
+  $('metrics').classList.toggle('stale', stale);
+  if (stale) {
+    const t = new Date(lastDataAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    $('staleNote').textContent = `Số liệu lần cuối lúc ${t}` + (sleeping ? ' – xe đang ngủ' : ' – chưa nhận dữ liệu mới');
+  }
 }
 
 // Chỉ coi là "đang canh" khi đã kết nối VÀ đã nhận được dữ liệu từ xe
@@ -312,7 +330,7 @@ document.addEventListener('visibilitychange', () => {
 
 // ---------- Xử lý trạng thái từ xe: "pin%,mV,rssi,cờ" ----------
 function onStatus(text) {
-  lastRx = Date.now();
+  lastRx = lastDataAt = Date.now();
   lostAlarmed = false;
   if (++rxCount === 1) {
     if (sleeping) { sleeping = false; softWarn('Xe đã thức dậy và kết nối lại'); }
@@ -351,10 +369,13 @@ function onStatus(text) {
   if (r) {
     rssiHist.push(r);
     if (rssiHist.length > RSSI_AVG_N) rssiHist.shift();
-    $('mRssi').textContent = `${r} dBm · ${distText(Math.round(rssiAvg()))}`;
-    $('mDist').textContent = r > -60 ? 'Rất gần' : r > -75 ? 'Gần' : r > -88 ? 'Xa' : 'Rất xa';
-    $('rssiBar').style.width = Math.max(0, Math.min(100, (r + 100) * 2)) + '%';
-    $('rssiBar').style.background = r <= Number($('early').value) ? 'var(--warn)' : 'var(--accent)';
+    // Chữ, số mét và thanh cùng dùng trung bình 5 giây cho khớp nhau
+    // (cảnh báo "ra xa" bên dưới vẫn dùng số đo tức thời)
+    const ra = Math.round(rssiAvg());
+    $('mRssi').textContent = `${ra} dBm · ${distText(ra)}`;
+    $('mDist').textContent = ra > -60 ? 'Rất gần' : ra > -75 ? 'Gần' : ra > -88 ? 'Xa' : 'Rất xa';
+    $('rssiBar').style.width = Math.max(0, Math.min(100, (ra + 100) * 2)) + '%';
+    $('rssiBar').style.background = ra <= Number($('early').value) ? 'var(--warn)' : 'var(--accent)';
   }
 
   // Cảnh báo sớm: tín hiệu yếu liên tục vài giây khi đang canh
@@ -417,6 +438,7 @@ function onStatus(text) {
     $('guard').checked = false; $('guard').onchange();
     raiseAlarm('🔋 PIN CẠN', 'Pin trên xe đã cạn, thiết bị tắt để bảo vệ pin. Đã tự tắt canh xe để không báo nhầm.');
   }
+  updateStale();
 }
 
 function lostAlarm(reason) {
@@ -509,6 +531,7 @@ function onDisconnected() {
 // Phát hiện mất tín hiệu sớm hơn sự kiện ngắt kết nối của trình duyệt
 // (chỉ khi trước đó đã nhận được dữ liệu; chưa ghép đôi thì đã có checkPaired báo)
 setInterval(() => {
+  updateStale();
   if (device && device.gatt.connected && rxCount > 0 && !sleeping && Date.now() - lastRx > STALE_MS) {
     lostAlarm('Không nhận được tín hiệu từ xe.');
   }
